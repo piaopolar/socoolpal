@@ -329,7 +329,7 @@ int GetMouseMoveDir(int nMouseX, int nMouseY)
 	int nHeroY = nScrH / 2;
 
 	int nDeltaX = nMouseX - nHeroX;
-	int nDeltaY = nMouseY - nHeroY;
+	int nDeltaY = nHeroY - nMouseY;
 
 	int nAbsDeltaX = abs(nDeltaX);
 	int nAbsDeltaY = abs(nDeltaY);
@@ -429,6 +429,7 @@ PAL_MouseEventFilter(
 
    if (lpEvent->type!= SDL_MOUSEBUTTONDOWN && lpEvent->type != SDL_MOUSEBUTTONUP)
       return;
+
    screenWidth = g_wInitialWidth;
    screenHeight = g_wInitialHeight;
    gridWidth = screenWidth / 3;
@@ -448,6 +449,7 @@ PAL_MouseEventFilter(
 */
 
    g_InputState.controlType = CONTROL_TYPE_NONE;
+   g_InputState.dir = kDirUnknown;
 
    switch (lpEvent->type)
    {

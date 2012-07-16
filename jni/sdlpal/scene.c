@@ -749,14 +749,24 @@ PAL_UpdatePartyGestures(
    }
 }
 
-void GetMouseMoveDirOffset(int nDir, int* pOffsetX, int* pOffsetY)
+int GetStdDir(int nMoveDir)
+{
+	int nArrTableMoveDir2StdDir[eMoveDirUp + 1] = { kDirUnknown, kDirNorth, kDirEast, kDirEast, kDirSouth, kDirSouth, kDirWest, kDirWest, kDirNorth };
+	if (0 <= nMoveDir && nMoveDir <= eMoveDirUp) {
+		return nArrTableMoveDir2StdDir[nMoveDir];
+	}
+
+	return kDirUnknown;
+}
+
+int GetMouseMoveDirOffset(int nDir, int* pOffsetX, int* pOffsetY)
 {
 	int xSource = PAL_X(gpGlobals->viewport) + PAL_X(gpGlobals->partyoffset);
 	int ySource = PAL_Y(gpGlobals->viewport) + PAL_Y(gpGlobals->partyoffset);
 	int nDir1 = nDir;
 	int nDir2 = nDir;
 	int nArrOffsetX[] = { 0, 1, 1, 1, 0, -1, -1, -1, 0 };
-	int nArrOffsetY[] = { 0, 1, 0, -1, -1, -1, 0, 1, 1 };
+	int nArrOffsetY[] = { 0, -1, 0, 1, 1, 1, 0, -1, -1 };
 	int nOffsetX = 0;
 	int nOffsetY = 0;
 	int nTargetX;
@@ -808,7 +818,7 @@ void GetMouseMoveDirOffset(int nDir, int* pOffsetX, int* pOffsetY)
 	*pOffsetY = nOffsetY;
 
 	if (!PAL_CheckObstacle(PAL_XY(nTargetX, nTargetY), TRUE, 0)) {
-		return;
+		return GetStdDir(nDir1);
 	}
 
 	nOffsetX = nArrOffsetX[nDir2] * 16;
@@ -819,7 +829,10 @@ void GetMouseMoveDirOffset(int nDir, int* pOffsetX, int* pOffsetY)
 	if (!PAL_CheckObstacle(PAL_XY(nTargetX, nTargetY), TRUE, 0)) {
 		*pOffsetX = nOffsetX;
 		*pOffsetY = nOffsetY;
+		return GetStdDir(nDir2);
 	}
+
+	return GetStdDir(nDir1); 
 }
 
 VOID
@@ -849,10 +862,11 @@ PAL_UpdateParty(
    if (g_InputState.dir != kDirUnknown)
    {
 	  if (CONTROL_TYPE_MOUSE_WALK == g_InputState.controlType) {
-		  GetMouseMoveDirOffset(g_InputState.nMoveDir, &xOffset, &yOffset);
+		 gpGlobals->wPartyDirection = GetMouseMoveDirOffset(g_InputState.nMoveDir, &xOffset, &yOffset);
 	  } else {
 		  xOffset = ((g_InputState.dir == kDirWest || g_InputState.dir == kDirSouth) ? -16 : 16);
 		  yOffset = ((g_InputState.dir == kDirWest || g_InputState.dir == kDirNorth) ? -8 : 8);
+		  gpGlobals->wPartyDirection = g_InputState.dir;
 	  }
 
       xSource = PAL_X(gpGlobals->viewport) + PAL_X(gpGlobals->partyoffset);
@@ -861,7 +875,7 @@ PAL_UpdateParty(
       xTarget = xSource + xOffset;
       yTarget = ySource + yOffset;
 
-	  gpGlobals->wPartyDirection = g_InputState.dir;
+	  
       
 
       //
