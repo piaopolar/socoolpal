@@ -67,8 +67,11 @@ VIDEO_Init(
 
 --*/
 {
+	// android 平台在其他地方初始化
+#ifndef __ANDROID__
    g_wInitialWidth = wScreenWidth;
    g_wInitialHeight = wScreenHeight;
+#endif
 
    //
    // Create the screen surface.
@@ -87,6 +90,9 @@ VIDEO_Init(
    gpScreenReal = SDL_SetVideoMode(640, 480, 8, SDL_SWSURFACE | SDL_FULLSCREEN);
 #elif defined (PSP)
    gpScreenReal = SDL_SetVideoMode(320, 240, 8, SDL_SWSURFACE | SDL_FULLSCREEN);
+#elif defined (__IPHONEOS__)
+    // SDL_FULLSCREEN控制隐藏titlebar
+    gpScreenReal = SDL_SetVideoMode(wScreenWidth, wScreenHeight, 8, SDL_FULLSCREEN | SDL_WINDOW_BORDERLESS);
 #else
    gpScreenReal = SDL_SetVideoMode(wScreenWidth, wScreenHeight, 8,
       SDL_HWSURFACE | SDL_RESIZABLE | (fFullScreen ? SDL_FULLSCREEN : 0));
@@ -199,6 +205,9 @@ VIDEO_UpdateScreen(
    short           screenRealHeight = gpScreenReal->h;
    short           screenRealY = 0;
 
+   if (IsInBackground()) {
+		return;
+	}
    //
    // Lock surface if needed
    //
@@ -571,7 +580,6 @@ VIDEO_SwitchScreen(
    const int         rgIndex[6] = {0, 3, 1, 5, 2, 4};
    SDL_Rect          dstrect;
 
-   short             offset = 240 - 200;
    short             screenRealHeight = gpScreenReal->h;
    short             screenRealY = 0;
 
@@ -625,7 +633,7 @@ VIDEO_FadeScreen(
    BYTE              a, b;
    const int         rgIndex[6] = {0, 3, 1, 5, 2, 4};
    SDL_Rect          dstrect;
-   short             offset = 240 - 200;
+
    short             screenRealHeight = gpScreenReal->h;
    short             screenRealY = 0;
 

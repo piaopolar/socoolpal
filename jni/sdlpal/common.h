@@ -22,7 +22,7 @@
 #define _COMMON_H
 
 //#define PAL_WIN95          1 // not valid for now
-//#define PAL_CLASSIC        1
+#define PAL_CLASSIC        1
 
 #ifdef __cplusplus
 extern "C"
@@ -39,6 +39,7 @@ extern "C"
 
 #include "SDL.h"
 #include "SDL_endian.h"
+#include "SDL_compat.h"
 
 #ifdef _SDL_stdinc_h
 #define malloc       SDL_malloc
@@ -79,11 +80,13 @@ extern "C"
 #elif defined (ANDROID)
 #undef  _WIN32
 #undef  SDL_INIT_JOYSTICK
-#define SDL_INIT_JOYSTICK     0
+#define SDL_INIT_JOYSTICK     1
 #define PAL_HAS_MOUSE         1
 
 #elif defined __IPHONEOS__
-
+#undef SDL_INIT_JOYSTICK
+#define SDL_INIT_JOYSTICK     0
+#define PAL_HAS_MOUSE         1
 #else
 
 #define PAL_HAS_MOUSE         1
@@ -150,7 +153,7 @@ typedef unsigned char       UCHAR, *PUCHAR;
 
 typedef unsigned short      WORD, *LPWORD;
 typedef unsigned int        DWORD, *LPDWORD;
-typedef int                 INT, *LPINT, BOOL, *LPBOOL;
+typedef int                 INT, *LPINT;
 typedef unsigned int        UINT, *PUINT, UINT32, *PUINT32;
 typedef unsigned char       BYTE, *LPBYTE;
 typedef CONST BYTE         *LPCBYTE;
@@ -159,6 +162,10 @@ typedef void               *LPVOID;
 typedef const void         *LPCVOID;
 typedef CHAR               *LPSTR;
 typedef const CHAR         *LPCSTR;
+    
+#ifndef __OBJC__
+    typedef int            BOOL, *LPBOOL;
+#endif
 
 #endif
 

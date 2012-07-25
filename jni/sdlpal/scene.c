@@ -500,6 +500,81 @@ PAL_MakeScene(
    }
 }
 
+BOOL checkIsEventObjects(PAL_POS pos)
+{
+    int x, y, h, xr, yr;
+	int i;
+    
+    if (PAL_X(pos) < 0 || PAL_X(pos) >= 2048 || PAL_Y(pos) < 0 || PAL_Y(pos) >= 2048)
+    {
+        return TRUE;
+    }
+    
+    //
+    // Check if the map tile at the specified position is blocking
+    //
+    x = PAL_X(pos) / 32;
+    y = PAL_Y(pos) / 16;
+    h = 0;
+    
+    xr = PAL_X(pos) % 32;
+    yr = PAL_Y(pos) % 16;
+    
+    if (xr + yr * 2 >= 16)
+    {
+        if (xr + yr * 2 >= 48)
+        {
+            x++;
+            y++;
+        }
+        else if (32 - xr + yr * 2 < 16)
+        {
+            x++;
+        }
+        else if (32 - xr + yr * 2 < 48)
+        {
+            h = 1;
+        }
+        else
+        {
+            y++;
+        }
+    }
+    
+    //
+    // Loop through all event objects in the current scene
+    //
+    
+    for (i = gpGlobals->g.rgScene[gpGlobals->wNumScene - 1].wEventObjectIndex;
+         i < gpGlobals->g.rgScene[gpGlobals->wNumScene].wEventObjectIndex; i++)
+    {
+        LPEVENTOBJECT p = &(gpGlobals->g.lprgEventObject[i]);
+        if (i == -1)
+        {
+            //
+            // Skip myself
+            //
+            continue;
+        }
+        
+        //
+        // Is this object a blocking one?
+        //
+        if (p->sState >= kObjStateBlocker)
+        {
+            //
+            // Check for collision
+            //
+            if (abs(p->x - PAL_X(pos)) + abs(p->y - PAL_Y(pos)) * 2 < 16)
+            {
+                return TRUE;
+            }
+        }
+    }
+    
+    return FALSE;
+}
+
 BOOL
 PAL_CheckObstacle(
    PAL_POS         pos,
@@ -527,6 +602,7 @@ PAL_CheckObstacle(
 --*/
 {
    int x, y, h, xr, yr;
+   int tempx, tempy;
 
    if (PAL_X(pos) < 0 || PAL_X(pos) >= 2048 || PAL_Y(pos) < 0 || PAL_Y(pos) >= 2048)
    {
@@ -536,6 +612,8 @@ PAL_CheckObstacle(
    //
    // Check if the map tile at the specified position is blocking
    //
+   tempx = PAL_X(pos);
+   tempy = PAL_Y(pos);
    x = PAL_X(pos) / 32;
    y = PAL_Y(pos) / 16;
    h = 0;
@@ -749,24 +827,14 @@ PAL_UpdatePartyGestures(
    }
 }
 
-int GetStdDir(int nMoveDir)
-{
-	int nArrTableMoveDir2StdDir[eMoveDirUp + 1] = { kDirUnknown, kDirNorth, kDirEast, kDirEast, kDirSouth, kDirSouth, kDirWest, kDirWest, kDirNorth };
-	if (0 <= nMoveDir && nMoveDir <= eMoveDirUp) {
-		return nArrTableMoveDir2StdDir[nMoveDir];
-	}
-
-	return kDirUnknown;
-}
-
 int GetMouseMoveDirOffset(int nDir, int* pOffsetX, int* pOffsetY)
 {
 	int xSource = PAL_X(gpGlobals->viewport) + PAL_X(gpGlobals->partyoffset);
 	int ySource = PAL_Y(gpGlobals->viewport) + PAL_Y(gpGlobals->partyoffset);
 	int nDir1 = nDir;
 	int nDir2 = nDir;
-	int nArrOffsetX[] = { 0, 1, 1, 1, 0, -1, -1, -1, 0 };
-	int nArrOffsetY[] = { 0, -1, 0, 1, 1, 1, 0, -1, -1 };
+	int nArrOffsetX[] = { 0, 1, 1, -1, -1};
+	int nArrOffsetY[] = { 0, -1, 1, 1, -1};
 	int nOffsetX = 0;
 	int nOffsetY = 0;
 	int nTargetX;
@@ -817,8 +885,14 @@ int GetMouseMoveDirOffset(int nDir, int* pOffsetX, int* pOffsetY)
 	*pOffsetX = nOffsetX;
 	*pOffsetY = nOffsetY;
 
-	if (!PAL_CheckObstacle(PAL_XY(nTargetX, nTargetY), TRUE, 0)) {
-		return GetStdDir(nDir1);
+	
+	// 如果前方有物品的话，不改变方向
+	if (checkIsEventObjects(PAL_XY(nTargetX, nTargetY))) {
+		return nDir1;
+	}
+
+	if (!PAL_CheckObstacle(PAL_XY(nTargetX, nTargetY), FALSE, 0)) {
+		return nDir1;
 	}
 
 	nOffsetX = nArrOffsetX[nDir2] * 16;
@@ -826,13 +900,33 @@ int GetMouseMoveDirOffset(int nDir, int* pOffsetX, int* pOffsetY)
 	nTargetX = xSource + nOffsetX;
 	nTargetY = ySource + nOffsetY;
 
-	if (!PAL_CheckObstacle(PAL_XY(nTargetX, nTargetY), TRUE, 0)) {
+	if (!PAL_CheckObstacle(PAL_XY(nTargetX, nTargetY), FALSE, 0)) {
 		*pOffsetX = nOffsetX;
 		*pOffsetY = nOffsetY;
-		return GetStdDir(nDir2);
 	}
 
-	return GetStdDir(nDir1); 
+	return nDir2;
+}
+
+int getDirByMoveOffset(int x, int y)
+{
+	if (x < 0 && y < 0) {
+		return kDirWest;
+	}
+
+	if (x >0 && y > 0) {
+		return kDirEast;
+	}
+
+	if (x < 0 && y > 0) {
+		return kDirSouth;
+	}
+
+	if (x > 0 && y < 0) {
+		return kDirNorth;
+	}
+
+	return g_InputState.dir;
 }
 
 VOID
@@ -855,6 +949,7 @@ PAL_UpdateParty(
 --*/
 {
    int              xSource, ySource, xTarget, yTarget, xOffset, yOffset, i;
+   BOOL couldMove;
 
    //
    // Has user pressed one of the arrow keys?
@@ -862,7 +957,8 @@ PAL_UpdateParty(
    if (g_InputState.dir != kDirUnknown)
    {
 	  if (CONTROL_TYPE_MOUSE_WALK == g_InputState.controlType) {
-		 gpGlobals->wPartyDirection = GetMouseMoveDirOffset(g_InputState.nMoveDir, &xOffset, &yOffset);
+		  GetMouseMoveDirOffset(g_InputState.nMoveDir, &xOffset, &yOffset);
+		  gpGlobals->wPartyDirection = getDirByMoveOffset(xOffset, yOffset);
 	  } else {
 		  xOffset = ((g_InputState.dir == kDirWest || g_InputState.dir == kDirSouth) ? -16 : 16);
 		  yOffset = ((g_InputState.dir == kDirWest || g_InputState.dir == kDirNorth) ? -8 : 8);
@@ -875,13 +971,11 @@ PAL_UpdateParty(
       xTarget = xSource + xOffset;
       yTarget = ySource + yOffset;
 
-	  
-      
-
       //
       // Check for obstacles on the destination location
       //
-      if (!PAL_CheckObstacle(PAL_XY(xTarget, yTarget), TRUE, 0))
+	  couldMove = !PAL_CheckObstacle(PAL_XY(xTarget, yTarget), TRUE, 0);
+      if (couldMove)
       {
          //
          // Player will actually be moved. Store trail.
@@ -891,7 +985,7 @@ PAL_UpdateParty(
             gpGlobals->rgTrail[i + 1] = gpGlobals->rgTrail[i];
          }
 
-         gpGlobals->rgTrail[0].wDirection = g_InputState.dir;
+         gpGlobals->rgTrail[0].wDirection = gpGlobals->wPartyDirection;
          gpGlobals->rgTrail[0].x = xSource;
          gpGlobals->rgTrail[0].y = ySource;
 

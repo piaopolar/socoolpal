@@ -26,15 +26,19 @@
 
 #include "SDL_androidvideo.h"
 #include "SDL_androidwindow.h"
+#include "SDL_compat.h"
 
 int
 Android_CreateWindow(_THIS, SDL_Window * window)
 {
+    LOGI("Android_CreateWindow");
     if (Android_Window) {
         SDL_SetError("Android only supports one window");
         return -1;
     }
     Android_Window = window;
+    Android_PauseSem = SDL_CreateSemaphore(0);
+    Android_ResumeSem = SDL_CreateSemaphore(0);
 
     /* Adjust the window data to match the screen */
     window->x = 0;
@@ -44,6 +48,7 @@ Android_CreateWindow(_THIS, SDL_Window * window)
 
     window->flags &= ~SDL_WINDOW_RESIZABLE;     /* window is NEVER resizeable */
     window->flags |= SDL_WINDOW_FULLSCREEN;     /* window is always fullscreen */
+    window->flags &= ~SDL_WINDOW_HIDDEN;
     window->flags |= SDL_WINDOW_SHOWN;          /* only one window on Android */
     window->flags |= SDL_WINDOW_INPUT_FOCUS;    /* always has input focus */    
 
@@ -53,14 +58,20 @@ Android_CreateWindow(_THIS, SDL_Window * window)
 void
 Android_SetWindowTitle(_THIS, SDL_Window * window)
 {
+    LOGI("Android_SetWindowTitle");
     Android_JNI_SetActivityTitle(window->title);
 }
 
 void
 Android_DestroyWindow(_THIS, SDL_Window * window)
 {
+    LOGI("Android_DestroyWindow");
     if (window == Android_Window) {
         Android_Window = NULL;
+        if (Android_PauseSem) SDL_DestroySemaphore(Android_PauseSem);
+        if (Android_ResumeSem) SDL_DestroySemaphore(Android_ResumeSem);
+        Android_PauseSem = NULL;
+        Android_ResumeSem = NULL;
     }
 }
 

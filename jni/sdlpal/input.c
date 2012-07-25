@@ -22,17 +22,19 @@
 
 #include "main.h"
 #include <math.h>
+#include "SDL_events.h"
 
 PALINPUTSTATE            g_InputState;
+#ifdef PAL_HAS_JOYSTICKS
 static SDL_Joystick     *g_pJoy = NULL;
+#endif
 BOOL                     g_fUseJoystick = TRUE;
 
 #if defined(GPH)
 #define MIN_DEADZONE -16384
 #define MAX_DEADZONE 16384
 #endif
-
-static int get_dir_by_key(DWORD key)
+int get_dir_by_key(DWORD key)
 {
 	BOOL isLeftPress = (key & kKeyLeft) != 0;
 	BOOL isRightPress = (key & kKeyRight) != 0;
@@ -110,7 +112,7 @@ static int get_dir_by_key(DWORD key)
 	return kDirUnknown;
 }
 
-static VOID
+VOID
 PAL_KeyboardEventFilter(
    const SDL_Event       *lpEvent
 )
@@ -147,6 +149,7 @@ PAL_KeyboardEventFilter(
          }
       }
 
+	  LOGI("key down: %d", lpEvent->key.keysym.sym);
       switch (lpEvent->key.keysym.sym)
       {
 #ifdef __SYMBIAN32__
@@ -206,9 +209,11 @@ PAL_KeyboardEventFilter(
       case SDLK_LALT:
       case SDLK_RALT:
       case SDLK_KP0:
+	  case SDLK_MENU:   // android menu键
          g_InputState.dwKeyPress |= kKeyMenu;
          break;
-
+	  case SDLK_AC_HOME: // android home键(或许这里应该结束程序)
+		  break;
       case SDLK_RETURN:
       case SDLK_SPACE:
       case SDLK_KP_ENTER:
@@ -276,6 +281,7 @@ PAL_KeyboardEventFilter(
       //
       // Released a key
       //
+	   LOGI("key up: %d", lpEvent->key.keysym.sym);
       switch (lpEvent->key.keysym.sym)
       {
       case SDLK_UP:
@@ -321,8 +327,8 @@ PAL_KeyboardEventFilter(
 int GetMouseMoveDir(int nMouseX, int nMouseY)
 {
 	// why use initial ? Maybe fix later 
-	int nScrW = g_wInitialWidth;
-	int nScrH = g_wInitialHeight;
+	int nScrW = 320;
+	int nScrH = 200;
 
 	// 目前来看人物似乎总是在屏幕中心，即使走到地图边上;
 	int nHeroX = nScrW / 2;
@@ -346,8 +352,6 @@ int GetMouseMoveDir(int nMouseX, int nMouseY)
 			} else {
 				nDir = eMoveDirNW;
 			}
-		} else if (nDeltaY == 0) {
-			nDir = eMoveDirRight;
 		} else {
 			// 第四象限,E;
 			if (nAbsDeltaX > nAbsDeltaY) {
@@ -358,7 +362,7 @@ int GetMouseMoveDir(int nMouseX, int nMouseY)
 				nDir = eMoveDirES;
 			}
 		}
-	} else if (nDeltaX < 0) {
+	} else {
 		if (nDeltaY > 0) {
 			// 第二象限,W;
 			if (nAbsDeltaX > nAbsDeltaY) {
@@ -368,10 +372,8 @@ int GetMouseMoveDir(int nMouseX, int nMouseY)
 			} else {
 				nDir = eMoveDirWN;
 			}
-		} else if (nDeltaY == 0) {
-			nDir = eMoveDirLeft;
 		} else {
-			// 第四象限,S;
+			// 第三象限,S;
 			if (nAbsDeltaX > nAbsDeltaY) {
 				nDir = eMoveDirSW;
 			} else if (nAbsDeltaX == nAbsDeltaY) {
@@ -380,18 +382,12 @@ int GetMouseMoveDir(int nMouseX, int nMouseY)
 				nDir = eMoveDirSE;
 			}
 		}
-	} else {
-		if (nDeltaY > 0) {
-			nDir = eMoveDirUp;
-		} else if (nDeltaY < 0) {
-			nDir = eMoveDirDown;
-		}
 	}
 
 	return nDir;
 }
 
-static VOID
+VOID
 PAL_MouseEventFilter(
    const SDL_Event *lpEvent
 )
@@ -419,23 +415,42 @@ PAL_MouseEventFilter(
    double       thumbx;
    double       thumby;
    INT          gridIndex;
-   BOOL			isLeftMouseDBClick = FALSE;
-   BOOL			isLeftMouseClick = FALSE;
-   static INT   lastReleaseButtonTime, lastPressButtonTime, betweenTime;
+   static INT   lastReleaseButtonTime, lastPressButtonTime;
    static INT   lastPressx = 0;
    static INT   lastPressy = 0;
    static INT   lastReleasex = 0;
    static INT   lastReleasey = 0;
-
-   if (lpEvent->type!= SDL_MOUSEBUTTONDOWN && lpEvent->type != SDL_MOUSEBUTTONUP)
+   static INT   lastMotionX = 0;
+   static INT   lastMotionY = 0;
+   int mouseX, mouseY;
+   int eventType;
+#ifdef __ANDROID__
+   eventType = lpEvent->tfinger.type;
+    if (lpEvent->tfinger.type!= SDL_FINGERDOWN && lpEvent->tfinger.type != SDL_FINGERUP
+	   && lpEvent->tfinger.type != SDL_FINGERMOTION)
       return;
-
+#else
+    eventType = lpEvent->tfinger.type;
+   if (lpEvent->type!= SDL_MOUSEBUTTONDOWN && lpEvent->type != SDL_MOUSEBUTTONUP
+	   && lpEvent->type != SDL_MOUSEMOTION)
+      return;
+#endif
    screenWidth = g_wInitialWidth;
    screenHeight = g_wInitialHeight;
    gridWidth = screenWidth / 3;
    gridHeight = screenHeight / 3;
+
+#ifdef __ANDROID__
+   mx = lpEvent->tfinger.x;
+   my = lpEvent->tfinger.y;
+   mouseX = lpEvent->tfinger.x;
+   mouseY = lpEvent->tfinger.y;
+#else
    mx = lpEvent->button.x;
    my = lpEvent->button.y;
+   mouseX = lpEvent->button.x;
+   mouseY = lpEvent->button.y;
+#endif
 
    thumbx = ceil(mx / gridWidth);
    thumby = floor(my / gridHeight);
@@ -449,19 +464,74 @@ PAL_MouseEventFilter(
 */
 
    g_InputState.controlType = CONTROL_TYPE_NONE;
-   g_InputState.dir = kDirUnknown;
 
-   switch (lpEvent->type)
+   switch (eventType)
    {
+#ifdef __ANDROID__
+       case SDL_FINGERDOWN:
+#else
    case SDL_MOUSEBUTTONDOWN:
+#endif
+   LOGI("SDL_FINGERDOWN: %d  %d  %d     %d  %d", eventType, mouseX,  mouseY, g_wInitialWidth, g_wInitialHeight);
       lastPressButtonTime = SDL_GetTicks();
-      lastPressx = lpEvent->button.x;
-      lastPressy = lpEvent->button.y;
+
+      lastPressx = mouseX;
+      lastPressy = mouseY;
+
+	  g_InputState.touchEventType = TOUCH_DOWN;
+	  g_InputState.touchX = mouseX * 320.0 / g_wInitialWidth;
+	  g_InputState.touchY = mouseY * 200.0 / g_wInitialHeight;
       
 	  if (4 != gridIndex) {
 		  g_InputState.controlType = CONTROL_TYPE_MOUSE_WALK;
-		  g_InputState.nMoveDir = GetMouseMoveDir(lastPressx, lastPressy);
+		  g_InputState.nMoveDir = GetMouseMoveDir(g_InputState.touchX, g_InputState.touchY);
 	  }
+           	  
+	  switch (gridIndex)
+	  {
+	  case 2:
+		  g_InputState.dir = kDirNorth;
+		  break;
+	  case 6:
+		  g_InputState.dir = kDirSouth;
+		  break;
+	  case 0:
+		  g_InputState.dir = kDirWest;
+		  break;
+	  case 8:
+		  g_InputState.dir = kDirEast;
+		  break;
+	  case 1:
+		  g_InputState.dir = kDirNorth;
+		  break;
+	  case 7:
+		  g_InputState.dir = kDirSouth; 
+		  break;
+	  case 3:
+		  g_InputState.dir = kDirWest;
+		  break;
+	  case 5:
+		  g_InputState.dir = kDirEast;
+		  break;
+	  }
+      break;
+#ifdef __ANDROID__
+       case SDL_FINGERMOTION:
+#else
+   case SDL_MOUSEMOTION:
+	   if (lpEvent->motion.state == 0) {
+		   break;
+	   }
+#endif
+       if (mouseX == lastMotionX && mouseY == lastMotionY) {
+           break;
+       }
+  LOGI("SDL_MOUSEMOTION: %d  %d  %d     %d  %d", eventType, mouseX,  mouseY, g_wInitialWidth, g_wInitialHeight);
+    lastMotionX = mouseX;
+       lastMotionY = mouseY;
+
+       g_InputState.controlType = CONTROL_TYPE_MOUSE_WALK;
+       g_InputState.nMoveDir = GetMouseMoveDir(mouseX * 320.0 / g_wInitialWidth, mouseY * 200.0 / g_wInitialHeight);
 
 	  switch (gridIndex)
 	  {
@@ -478,67 +548,56 @@ PAL_MouseEventFilter(
 		  g_InputState.dir = kDirEast;
 		  break;
 	  case 1:
-		  //g_InputState.prevdir = g_InputState.dir;
 		  g_InputState.dir = kDirNorth;
-		  //g_InputState.dwKeyPress |= kKeyUp;
 		  break;
 	  case 7:
-		  //g_InputState.prevdir = g_InputState.dir;
 		  g_InputState.dir = kDirSouth; 
-		  //g_InputState.dwKeyPress |= kKeyDown;
 		  break;
 	  case 3:
-		  //g_InputState.prevdir = g_InputState.dir;
 		  g_InputState.dir = kDirWest;
-		  //g_InputState.dwKeyPress |= kKeyLeft;
 		  break;
 	  case 5:
-		  //g_InputState.prevdir = g_InputState.dir;
 		  g_InputState.dir = kDirEast;
-		  //g_InputState.dwKeyPress |= kKeyRight;
 		  break;
 	  }
-
-      break;
+	   break;
+#ifdef __ANDROID__
+       case SDL_FINGERUP:
+#else
    case SDL_MOUSEBUTTONUP:
-      lastReleaseButtonTime = SDL_GetTicks();
-      lastReleasex = lpEvent->button.x;
-      lastReleasey = lpEvent->button.y;
+#endif
+      LOGI("SDL_FINGERUP: %d  %d  %d     %d  %d", eventType, mouseX,  mouseY, g_wInitialWidth, g_wInitialHeight);
+       lastReleaseButtonTime = SDL_GetTicks();
+      lastReleasex = mouseX;
+      lastReleasey = mouseY;
       hitTest ++;
-   
-      switch (gridIndex)
-      {
-	// 在方向区域，直接停止移动
-	  case 0:
-	  case 2:
-	  case 6:
-	  case 8:
-		  g_InputState.dir = kDirUnknown;
-		  break;
-      case 7:
-    	  g_InputState.dwKeyPress |= kKeyRepeat;
-    	  break;
-      case 1:
-    	 g_InputState.dwKeyPress |= kKeyForce;
-    	 break;
-      case 3:
-    	 g_InputState.dwKeyPress |= kKeyAuto;
-    	 break;
-      case 5:
-    	 g_InputState.dwKeyPress |= kKeyDefend;
-		 break;
-	// 中部区域，弹出菜单
-      case 4:
-		g_InputState.dwKeyPress |= kKeyMenu;
-		g_InputState.dwKeyPress |= kKeySearch;		
-        break;
-      }
+
+	  if (lastReleaseButtonTime - lastPressButtonTime <= 1000) {
+		g_InputState.touchEventType = TOUCH_UP;
+		g_InputState.touchX = mouseX * 320.0 / g_wInitialWidth;
+		g_InputState.touchY = mouseY * 200.0 / g_wInitialHeight;
+	  } else {
+		g_InputState.touchEventType = TOUCH_NONE;
+	  }
+           
+           
+	  if (gridIndex == 4) {
+		  if (abs(lastReleasex - lastPressx) <= 25
+			  && abs(lastReleasey - lastPressy) <= 25) {
+			if (lastReleaseButtonTime - lastPressButtonTime <= 500) {
+				g_InputState.dwKeyPress |= kKeyMainSearch;
+			}
+		  }
+	  }
+
+	  g_InputState.dir = kDirUnknown;
+	  g_InputState.nMoveDir = eMoveDirUnknown;
       break;
    }
 #endif
 }
 
-static VOID
+VOID
 PAL_JoystickEventFilter(
    const SDL_Event       *lpEvent
 )
@@ -730,8 +789,7 @@ PAL_EventFilter(
    const SDL_Event       *lpEvent
 )
 #else
-static int SDLCALL
-PAL_EventFilter(
+int PAL_EventFilter(
    void                  *userdata,
    const SDL_Event       *lpEvent
 )
@@ -754,11 +812,13 @@ PAL_EventFilter(
 {
    switch (lpEvent->type)
    {
-   case SDL_VIDEORESIZE:
-      //
-      // resized the window
-      //
-      VIDEO_Resize(lpEvent->resize.w, lpEvent->resize.h);
+   case SDL_WINDOWEVENT:
+	   if (lpEvent->window.event == SDL_WINDOWEVENT_RESIZED) {
+// 		   VIDEO_Resize(lpEvent->window.data1, lpEvent->window.data2);
+// 		   g_wInitialWidth = lpEvent->window.data1;
+// 		   g_wInitialHeight = lpEvent->window.data2;
+// 		   LOGI("SDL_WINDOWEVENT_RESIZED: %d  %d", g_wInitialWidth, g_wInitialHeight);
+	   }
       break;
 
    case SDL_QUIT:
@@ -767,6 +827,7 @@ PAL_EventFilter(
       //
       PAL_Shutdown();
       exit(0);
+	  break;
    }
 
    PAL_KeyboardEventFilter(lpEvent);
@@ -797,8 +858,9 @@ PAL_ClearKeyState(
     None.
 
 --*/
-{
+{   
    g_InputState.dwKeyPress = 0;
+    g_InputState.touchEventType = TOUCH_NONE;   
 }
 
 VOID
@@ -822,9 +884,8 @@ PAL_InitInput(
 {
    memset(&g_InputState, 0, sizeof(g_InputState));
    g_InputState.dir = kDirUnknown;
-#if SDL_MAJOR_VERSION == 1 && SDL_MINOR_VERSION <= 2
-   SDL_SetEventFilter(PAL_EventFilter);
-#else
+
+#ifndef __ANDROID__
    SDL_SetEventFilter(PAL_EventFilter, NULL);
 #endif
 
@@ -891,8 +952,113 @@ PAL_ProcessEvent(
 
 --*/
 {
+#ifdef __ANDROID__
+	SDL_Event evt;
+	while (SDL_PollEvent(&evt)) {
+		switch (evt.type) {
+			case SDL_WINDOWEVENT:
+			   if (evt.window.event == SDL_WINDOWEVENT_RESIZED) {
+		// 		   VIDEO_Resize(lpEvent->window.data1, lpEvent->window.data2);
+		// 		   g_wInitialWidth = lpEvent->window.data1;
+		// 		   g_wInitialHeight = lpEvent->window.data2;
+		// 		   LOGI("SDL_WINDOWEVENT_RESIZED: %d  %d", g_wInitialWidth, g_wInitialHeight);
+			   } else if (evt.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+				   extern BOOL g_hasInGame;
+				   LOGI("in SDL_WINDOWEVENT_FOCUS_LOST");
+				   g_isInBackground = SDL_TRUE;
+
+				   if (g_hasInGame) {
+					  PAL_SaveGame("9.rpg", 0);
+				   }
+			   } else if (evt.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+				   LOGI("in SDL_WINDOWEVENT_FOCUS_GAINED");
+				   g_isInBackground = SDL_FALSE;
+				   VIDEO_Resize(g_wInitialWidth, g_wInitialHeight);
+			   }
+			  break;
+
+			case SDL_QUIT:
+			  //
+			  // clicked on the close button of the window. Quit immediately.
+			  //
+			  PAL_Shutdown();
+			  exit(0);
+			  break;
+			case SDL_KEYDOWN:
+			case SDL_KEYUP:
+				PAL_KeyboardEventFilter(&evt);
+				return;
+			  break;
+			case SDL_FINGERDOWN:
+			case SDL_FINGERUP:
+				PAL_MouseEventFilter(&evt);
+				return;
+				break;
+			case SDL_FINGERMOTION:
+				PAL_MouseEventFilter(&evt);
+				break;
+			case SDL_JOYBUTTONDOWN:
+			case SDL_JOYBUTTONUP:
+				PAL_JoystickEventFilter(&evt);
+				return;
+				break;
+			case SDL_JOYAXISMOTION:
+			case SDL_JOYBALLMOTION:
+			case SDL_JOYHATMOTION:
+				PAL_JoystickEventFilter(&evt);
+				break;
+		}
+
+   }
+#else
 #ifdef PAL_HAS_NATIVEMIDI
    MIDI_CheckLoop();
 #endif
    while (SDL_PollEvent(NULL));
+#endif
+}
+
+BOOL PAL_IsTouch(int x, int y, int w, int h)
+{
+//	LOGI("is touch: %d %d %d %d %d %d", x, y, w, h, g_InputState.touchX, g_InputState.touchY);
+	if (g_InputState.touchEventType == TOUCH_NONE) {
+		return FALSE;
+	}
+
+//	LOGI("yes is touch: %d %d %d %d %d %d", x, y, w, h, g_InputState.touchX, g_InputState.touchY);
+	if (g_InputState.touchX >= x && g_InputState.touchX <= x + w
+		&& g_InputState.touchY >= y && g_InputState.touchY <= y + h) {
+//			LOGI("yes is touch in: %d %d %d %d %d %d", x, y, w, h, g_InputState.touchX, g_InputState.touchY);
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+BOOL PAL_IsTouchDown(int x, int y, int w, int h)
+{
+	if (g_InputState.touchEventType != TOUCH_DOWN) {
+		return FALSE;
+	}
+
+	if (g_InputState.touchX >= x && g_InputState.touchX <= x + w
+		&& g_InputState.touchY >= y && g_InputState.touchY <= y + h) {
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+BOOL PAL_IsTouchUp(int x, int y, int w, int h)
+{
+	if (g_InputState.touchEventType != TOUCH_UP) {
+		return FALSE;
+	}
+
+	if (g_InputState.touchX >= x && g_InputState.touchX <= x + w
+		&& g_InputState.touchY >= y && g_InputState.touchY <= y + h) {
+			return TRUE;
+	}
+
+	return FALSE;
 }

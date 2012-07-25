@@ -72,6 +72,12 @@ extern "C"
 #define SYSMENU_LABEL_SOUND                14
 #define SYSMENU_LABEL_QUIT                 15
 #define SYSMENU_LABEL_BATTLEMODE           (PAL_ADDITIONAL_WORD_FIRST)
+#define LABEL_PAGE_UP						(PAL_ADDITIONAL_WORD_FIRST + 6)
+#define LABEL_PAGE_DOWN						(PAL_ADDITIONAL_WORD_FIRST + 7)
+#define LABEL_SYSTEM						(PAL_ADDITIONAL_WORD_FIRST + 8)
+#define LABEL_SEARCH						(PAL_ADDITIONAL_WORD_FIRST + 9)
+#define LABEL_BACK						    (PAL_ADDITIONAL_WORD_FIRST + 10)
+#define LABEL_CONTINUE					   (PAL_ADDITIONAL_WORD_FIRST + 11)
 
 #define BATTLESPEEDMENU_LABEL_1            (PAL_ADDITIONAL_WORD_FIRST + 1)
 #define BATTLESPEEDMENU_LABEL_2            (PAL_ADDITIONAL_WORD_FIRST + 2)
@@ -131,6 +137,8 @@ typedef struct tagMENUITEM
    WORD          wNumWord;
    BOOL          fEnabled;
    PAL_POS       pos;
+   int			 width;
+   int			 height;
 } MENUITEM, *LPMENUITEM;
 
 typedef struct tagOBJECTDESC
@@ -174,7 +182,8 @@ PAL_CreateBox(
    INT            nRows,
    INT            nColumns,
    INT            iStyle,
-   BOOL           fSaveScreen
+   BOOL           fSaveScreen,
+   SDL_Rect*	  outputRect
 );
 
 LPBOX
@@ -195,7 +204,29 @@ PAL_ReadMenu(
    LPMENUITEM                rgMenuItem,
    INT                       nMenuItem,
    WORD                      wDefaultItem,
-   BYTE                      bLabelColor
+   BYTE                      bLabelColor,
+   BOOL						couldCancel
+);
+
+WORD
+	PAL_ReadMenu_Save(
+	LPITEMCHANGED_CALLBACK    lpfnMenuItemChanged,
+	LPMENUITEM                rgMenuItem,
+	INT                       nMenuItem,
+	WORD                      wDefaultItem,
+	BYTE                      bLabelColor,
+	BOOL						couldCancel,
+	int width, int height, SDL_Rect boundingBox
+);
+
+WORD
+PAL_ReadMenu_Buy(
+   LPITEMCHANGED_CALLBACK    lpfnMenuItemChanged,
+   LPMENUITEM                rgMenuItem,
+   INT                       nMenuItem,
+   WORD                      wDefaultItem,
+   BYTE                      bLabelColor,
+   BOOL						couldCancel
 );
 
 VOID
@@ -224,6 +255,12 @@ PAL_GetObjectDesc(
 );
 
 extern LPSPRITE gpSpriteUI;
+
+
+#define UI_ELEMENT_LEFT 0
+#define UI_ELEMENT_RIGHT 1
+
+SDL_Surface* get_ui_element(int type);
 
 #ifdef __cplusplus
 }

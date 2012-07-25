@@ -29,6 +29,7 @@
 
 #if SDL_VIDEO_OPENGL_GLX
 #include "SDL_loadso.h"
+#include "SDL_x11opengles.h"
 
 #if defined(__IRIX__)
 /* IRIX doesn't have a GL library versioning system */
@@ -67,11 +68,6 @@
 #define GLX_CONTEXT_DEBUG_BIT_ARB          0x0001
 #define GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB 0x0002
 
-#ifndef GLX_EXT_swap_control
-#define GLX_SWAP_INTERVAL_EXT              0x20F1
-#define GLX_MAX_SWAP_INTERVAL_EXT          0x20F2
-#endif
-
 /* Typedef for the GL 3.0 context creation function */
 typedef GLXContext(*PFNGLXCREATECONTEXTATTRIBSARBPROC) (Display * dpy,
                                                         GLXFBConfig config,
@@ -80,6 +76,31 @@ typedef GLXContext(*PFNGLXCREATECONTEXTATTRIBSARBPROC) (Display * dpy,
                                                         Bool direct,
                                                         const int
                                                         *attrib_list);
+#endif
+
+#ifndef GLX_ARB_create_context_profile
+#define GLX_ARB_create_context_profile
+#define GLX_CONTEXT_PROFILE_MASK_ARB       0x9126
+#define GLX_CONTEXT_CORE_PROFILE_BIT_ARB   0x00000001
+#define GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB 0x00000002
+#endif
+
+#ifndef GLX_ARB_create_context_robustness
+#define GLX_ARB_create_context_robustness
+#define GLX_CONTEXT_ROBUST_ACCESS_BIT_ARB  0x00000004
+#define GLX_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB     0x8256
+#define GLX_NO_RESET_NOTIFICATION_ARB                   0x8261
+#define GLX_LOSE_CONTEXT_ON_RESET_ARB                   0x8252
+#endif
+
+#ifndef GLX_EXT_create_context_es2_profile
+#define GLX_EXT_create_context_es2_profile
+#define GLX_CONTEXT_ES2_PROFILE_BIT_EXT    0x00000002
+#endif
+
+#ifndef GLX_EXT_swap_control
+#define GLX_SWAP_INTERVAL_EXT              0x20F1
+#define GLX_MAX_SWAP_INTERVAL_EXT          0x20F2
 #endif
 
 #define OPENGL_REQUIRES_DLOPEN
@@ -101,6 +122,28 @@ int
 X11_GL_LoadLibrary(_THIS, const char *path)
 {
     void *handle;
+
+    if (_this->gl_data) {
+        SDL_SetError("OpenGL context already created");
+        return -1;
+    }
+
+#if SDL_VIDEO_OPENGL_ES || SDL_VIDEO_OPENGL_ES2
+    /* If SDL_GL_CONTEXT_EGL has been changed to 1, switch over to X11_GLES functions  */
+    if (_this->gl_config.use_egl == 1) {
+        _this->GL_LoadLibrary = X11_GLES_LoadLibrary;
+        _this->GL_GetProcAddress = X11_GLES_GetProcAddress;
+        _this->GL_UnloadLibrary = X11_GLES_UnloadLibrary;
+        _this->GL_CreateContext = X11_GLES_CreateContext;
+        _this->GL_MakeCurrent = X11_GLES_MakeCurrent;
+        _this->GL_SetSwapInterval = X11_GLES_SetSwapInterval;
+        _this->GL_GetSwapInterval = X11_GLES_GetSwapInterval;
+        _this->GL_SwapWindow = X11_GLES_SwapWindow;
+        _this->GL_DeleteContext = X11_GLES_DeleteContext;
+        return X11_GLES_LoadLibrary(_this, path);
+    }
+#endif
+
 
     /* Load the OpenGL library */
     if (path == NULL) {
@@ -305,16 +348,24 @@ X11_GL_InitExtensions(_THIS)
     X11_PumpEvents(_this);
 }
 
+/* glXChooseVisual and glXChooseFBConfig have some small differences in
+ * the attribute encoding, it can be chosen with the for_FBConfig parameter. 
+ */
 int 
-X11_GL_GetAttributes(_THIS, Display * display, int screen, int * attribs, int size)
+X11_GL_GetAttributes(_THIS, Display * display, int screen, int * attribs, int size, Bool for_FBConfig)
 {
     int i = 0;
 
     /* assert buffer is large enough to hold all SDL attributes. */ 
-    /* assert(size >= 32);*/
+    SDL_assert(size >= 32);
 
     /* Setup our GLX attributes according to the gl_config. */
-    attribs[i++] = GLX_RGBA;
+    if( for_FBConfig ) {
+        attribs[i++] = GLX_RENDER_TYPE;
+	attribs[i++] = GLX_RGBA_BIT;
+    } else {
+        attribs[i++] = GLX_RGBA;
+    }
     attribs[i++] = GLX_RED_SIZE;
     attribs[i++] = _this->gl_config.red_size;
     attribs[i++] = GLX_GREEN_SIZE;
@@ -327,13 +378,10 @@ X11_GL_GetAttributes(_THIS, Display * display, int screen, int * attribs, int si
         attribs[i++] = _this->gl_config.alpha_size;
     }
 
-    if (_this->gl_config.buffer_size) {
-        attribs[i++] = GLX_BUFFER_SIZE;
-        attribs[i++] = _this->gl_config.buffer_size;
-    }
-
     if (_this->gl_config.double_buffer) {
         attribs[i++] = GLX_DOUBLEBUFFER;
+	if( for_FBConfig )
+	    attribs[i++] = True;
     }
 
     attribs[i++] = GLX_DEPTH_SIZE;
@@ -366,6 +414,8 @@ X11_GL_GetAttributes(_THIS, Display * display, int screen, int * attribs, int si
 
     if (_this->gl_config.stereo) {
         attribs[i++] = GLX_STEREO;
+	if( for_FBConfig )
+	    attribs[i++] = True;
     }
 
     if (_this->gl_config.multisamplebuffers) {
@@ -396,10 +446,8 @@ X11_GL_GetVisual(_THIS, Display * display, int screen)
     XVisualInfo *vinfo;
 
     /* 64 seems nice. */
-    const int max_attrs = 64;
-    int attribs[max_attrs];
-    const int i = X11_GL_GetAttributes(_this,display,screen,attribs,max_attrs);
-    SDL_assert(i <= max_attrs);
+    int attribs[64];
+    X11_GL_GetAttributes(_this,display,screen,attribs,64,SDL_FALSE);
 
     if (!_this->gl_data) {
         /* The OpenGL library wasn't loaded, SDL_GetError() should have info */
@@ -444,13 +492,29 @@ X11_GL_CreateContext(_THIS, SDL_Window * window)
                 SDL_SetError("Could not create GL context");
                 return NULL;
             } else {
-                int attribs[] = {
+	        /* max 8 attributes plus terminator */
+                int attribs[9] = {
                     GLX_CONTEXT_MAJOR_VERSION_ARB,
                     _this->gl_config.major_version,
                     GLX_CONTEXT_MINOR_VERSION_ARB,
                     _this->gl_config.minor_version,
                     0
                 };
+		int iattr = 4;
+
+		/* SDL profile bits match GLX profile bits */
+		if( _this->gl_config.profile_mask != 0 ) {
+		    attribs[iattr++] = GLX_CONTEXT_PROFILE_MASK_ARB;
+		    attribs[iattr++] = _this->gl_config.profile_mask;
+		}
+
+		/* SDL flags match GLX flags */
+		if( _this->gl_config.flags != 0 ) {
+		    attribs[iattr++] = GLX_CONTEXT_FLAGS_ARB;
+		    attribs[iattr++] = _this->gl_config.flags;
+		}
+
+		attribs[iattr++] = 0;
 
                 /* Get a pointer to the context creation function for GL 3.0 */
                 PFNGLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribs =
@@ -477,7 +541,7 @@ X11_GL_CreateContext(_THIS, SDL_Window * window)
                              int *)) _this->gl_data->
                         glXGetProcAddress((GLubyte *) "glXChooseFBConfig");
 
-                    X11_GL_GetAttributes(_this,display,screen,glxAttribs,64);
+                    X11_GL_GetAttributes(_this,display,screen,glxAttribs,64,SDL_TRUE);
 
                     if (!glXChooseFBConfig
                         || !(framebuffer_config =

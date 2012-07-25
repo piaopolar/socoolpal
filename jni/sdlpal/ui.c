@@ -95,7 +95,8 @@ PAL_CreateBox(
    INT            nRows,
    INT            nColumns,
    INT            iStyle,
-   BOOL           fSaveScreen
+   BOOL           fSaveScreen,
+   SDL_Rect*	  outputRect
 )
 /*++
   Purpose:
@@ -189,6 +190,13 @@ PAL_CreateBox(
       lpBox->wHeight = rect.h;
    }
 
+   if (outputRect) {
+	   outputRect->x = rect.x;
+	   outputRect->y = rect.y;
+	   outputRect->w = rect.w;
+	   outputRect->h = rect.h;
+   }
+
    //
    // Border takes 2 additional rows and columns...
    //
@@ -212,7 +220,6 @@ PAL_CreateBox(
 
       rect.y += PAL_RLEGetHeight(rglpBorderBitmap[m][0]);
    }
-
    return lpBox;
 }
 
@@ -370,7 +377,8 @@ PAL_ReadMenu(
    LPMENUITEM                rgMenuItem,
    INT                       nMenuItem,
    WORD                      wDefaultItem,
-   BYTE                      bLabelColor
+   BYTE                      bLabelColor,
+   BOOL						couldCancel
 )
 /*++
   Purpose:
@@ -398,6 +406,7 @@ PAL_ReadMenu(
 {
    int               i;
    WORD              wCurrentItem    = (wDefaultItem < nMenuItem) ? wDefaultItem : 0;
+   SDL_Rect rectMenuItem;
 
    //
    // Draw all the menu texts.
@@ -418,8 +427,10 @@ PAL_ReadMenu(
          }
       }
 
-      PAL_DrawText(PAL_GetWord(rgMenuItem[i].wNumWord), rgMenuItem[i].pos,
+      rectMenuItem = PAL_DrawMenuText(PAL_GetWord(rgMenuItem[i].wNumWord), rgMenuItem[i].pos,
          bColor, TRUE, TRUE);
+	  rgMenuItem[i].width = rectMenuItem.w;
+	  rgMenuItem[i].height = rectMenuItem.h;
    }
 
    if (lpfnMenuItemChanged != NULL)
@@ -436,12 +447,57 @@ PAL_ReadMenu(
       //
       if (rgMenuItem[wCurrentItem].fEnabled)
       {
-         PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+         PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
             rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
       }
 
       PAL_ProcessEvent();
 
+	  if (g_InputState.touchEventType == TOUCH_DOWN) {
+		  for (i = 0; i < nMenuItem; ++i) {
+			  if (PAL_IsTouch(PAL_X(rgMenuItem[i].pos), PAL_Y(rgMenuItem[i].pos), rgMenuItem[i].width, rgMenuItem[i].height)) {
+					if (rgMenuItem[wCurrentItem].fEnabled)
+					 {
+						//
+						// Dehighlight the unselected item.
+						//
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+					 }
+					 else
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+					 }
+
+					wCurrentItem = i;
+
+					 if (rgMenuItem[wCurrentItem].fEnabled)
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+					 }
+					 else
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
+					 }
+
+					 if (lpfnMenuItemChanged != NULL)
+					 {
+						(*lpfnMenuItemChanged)(rgMenuItem[wCurrentItem].wValue);
+					 }
+			  }
+		  }
+	  } else if (g_InputState.touchEventType == TOUCH_UP) {
+		  if (wCurrentItem != MENUITEM_VALUE_CANCELLED && wCurrentItem >= 0 && wCurrentItem < nMenuItem &&
+			  PAL_IsTouch(PAL_X(rgMenuItem[wCurrentItem].pos), PAL_Y(rgMenuItem[wCurrentItem].pos), rgMenuItem[wCurrentItem].width, rgMenuItem[wCurrentItem].height)) {
+			return rgMenuItem[wCurrentItem].wValue;
+		  } else if (couldCancel == TRUE) {
+			return MENUITEM_VALUE_CANCELLED;
+		  }
+	  }
+	  
       if (g_InputState.dwKeyPress & (kKeyDown | kKeyRight))
       {
          //
@@ -452,12 +508,12 @@ PAL_ReadMenu(
             //
             // Dehighlight the unselected item.
             //
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
          }
          else
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
          }
 
@@ -473,12 +529,12 @@ PAL_ReadMenu(
          //
          if (rgMenuItem[wCurrentItem].fEnabled)
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
          }
          else
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
          }
 
@@ -497,12 +553,12 @@ PAL_ReadMenu(
             //
             // Dehighlight the unselected item.
             //
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
          }
          else
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
          }
 
@@ -520,12 +576,12 @@ PAL_ReadMenu(
          //
          if (rgMenuItem[wCurrentItem].fEnabled)
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
          }
          else
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
          }
 
@@ -541,12 +597,12 @@ PAL_ReadMenu(
          //
          if (rgMenuItem[wCurrentItem].fEnabled)
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
          }
          else
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
          }
 
@@ -559,7 +615,487 @@ PAL_ReadMenu(
          //
          if (rgMenuItem[wCurrentItem].fEnabled)
          {
-            PAL_DrawText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_CONFIRMED, FALSE, TRUE);
+
+            return rgMenuItem[wCurrentItem].wValue;
+         }
+      }
+      //
+      // Use delay function to avoid high CPU usage.
+      //
+      SDL_Delay(50);
+   }
+
+   return MENUITEM_VALUE_CANCELLED;
+}
+
+WORD
+PAL_ReadMenu_Save(
+   LPITEMCHANGED_CALLBACK    lpfnMenuItemChanged,
+   LPMENUITEM                rgMenuItem,
+   INT                       nMenuItem,
+   WORD                      wDefaultItem,
+   BYTE                      bLabelColor,
+   BOOL						 couldCancel,
+   int width, int height, SDL_Rect boundingBox
+)
+{
+   int               i;
+   WORD              wCurrentItem    = (wDefaultItem < nMenuItem) ? wDefaultItem : 0;
+
+   //
+   // Draw all the menu texts.
+   //
+   for (i = 0; i < nMenuItem; i++)
+   {
+      BYTE bColor = bLabelColor;
+
+      if (!rgMenuItem[i].fEnabled)
+      {
+         if (i == wCurrentItem)
+         {
+            bColor = MENUITEM_COLOR_SELECTED_INACTIVE;
+         }
+         else
+         {
+            bColor = MENUITEM_COLOR_INACTIVE;
+         }
+      }
+
+      PAL_DrawMenuText(PAL_GetWord(rgMenuItem[i].wNumWord), rgMenuItem[i].pos,
+         bColor, TRUE, TRUE);
+   }
+
+   if (lpfnMenuItemChanged != NULL)
+   {
+      (*lpfnMenuItemChanged)(rgMenuItem[wDefaultItem].wValue);
+   }
+
+   while (TRUE)
+   {
+      PAL_ClearKeyState();
+
+      //
+      // Redraw the selected item if needed.
+      //
+      if (rgMenuItem[wCurrentItem].fEnabled)
+      {
+         PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+      }
+
+      PAL_ProcessEvent();
+
+	  if (g_InputState.touchEventType == TOUCH_DOWN) {
+		  for (i = 0; i < nMenuItem; ++i) {
+			  if (PAL_IsTouch(PAL_X(rgMenuItem[i].pos) - 5, PAL_Y(rgMenuItem[i].pos) + 8 - height / 2, width, height)) {
+					if (rgMenuItem[wCurrentItem].fEnabled)
+					 {
+						//
+						// Dehighlight the unselected item.
+						//
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+					 }
+					 else
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+					 }
+
+					wCurrentItem = i;
+
+					 if (rgMenuItem[wCurrentItem].fEnabled)
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+					 }
+					 else
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
+					 }
+
+					 if (lpfnMenuItemChanged != NULL)
+					 {
+						(*lpfnMenuItemChanged)(rgMenuItem[wCurrentItem].wValue);
+					 }
+			  }
+		  }
+	  } else if (g_InputState.touchEventType == TOUCH_UP) {
+		  if (wCurrentItem != MENUITEM_VALUE_CANCELLED && wCurrentItem >= 0 && wCurrentItem < nMenuItem &&
+			  PAL_IsTouch(PAL_X(rgMenuItem[wCurrentItem].pos) - 5, PAL_Y(rgMenuItem[wCurrentItem].pos) + 8 - height / 2, width, height)) {
+			return rgMenuItem[wCurrentItem].wValue;
+		  } else if (couldCancel == TRUE) {
+			  if (!PAL_IsTouch(boundingBox.x, boundingBox.y, boundingBox.w, boundingBox.h)) {
+				  return MENUITEM_VALUE_CANCELLED; 
+			  }
+		  }
+	  }
+	  
+      if (g_InputState.dwKeyPress & (kKeyDown | kKeyRight))
+      {
+         //
+         // User pressed the down or right arrow key
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            //
+            // Dehighlight the unselected item.
+            //
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+         }
+
+         wCurrentItem++;
+
+         if (wCurrentItem >= nMenuItem)
+         {
+            wCurrentItem = 0;
+         }
+
+         //
+         // Highlight the selected item.
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
+         }
+
+         if (lpfnMenuItemChanged != NULL)
+         {
+            (*lpfnMenuItemChanged)(rgMenuItem[wCurrentItem].wValue);
+         }
+      }
+      else if (g_InputState.dwKeyPress & (kKeyUp | kKeyLeft))
+      {
+         //
+         // User pressed the up or left arrow key
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            //
+            // Dehighlight the unselected item.
+            //
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+         }
+
+         if (wCurrentItem > 0)
+         {
+            wCurrentItem--;
+         }
+         else
+         {
+            wCurrentItem = nMenuItem - 1;
+         }
+
+         //
+         // Highlight the selected item.
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
+         }
+
+         if (lpfnMenuItemChanged != NULL)
+         {
+            (*lpfnMenuItemChanged)(rgMenuItem[wCurrentItem].wValue);
+         }
+      }
+      else if (g_InputState.dwKeyPress & kKeyMenu)
+      {
+         //
+         // User cancelled
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+         }
+
+         break;
+      }
+      else if (g_InputState.dwKeyPress & kKeySearch)
+      {
+         //
+         // User pressed Enter
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_CONFIRMED, FALSE, TRUE);
+
+            return rgMenuItem[wCurrentItem].wValue;
+         }
+      }
+      //
+      // Use delay function to avoid high CPU usage.
+      //
+      SDL_Delay(50);
+   }
+
+   return MENUITEM_VALUE_CANCELLED;
+}
+
+WORD
+PAL_ReadMenu_Buy(
+   LPITEMCHANGED_CALLBACK    lpfnMenuItemChanged,
+   LPMENUITEM                rgMenuItem,
+   INT                       nMenuItem,
+   WORD                      wDefaultItem,
+   BYTE                      bLabelColor,
+   BOOL						couldCancel
+)
+{
+   int               i;
+   WORD              wCurrentItem    = (wDefaultItem < nMenuItem) ? wDefaultItem : 0;
+   SDL_Rect rectMenuItem;
+   static int s_currentSelect;
+   s_currentSelect = wCurrentItem;
+
+   //
+   // Draw all the menu texts.
+   //
+   for (i = 0; i < nMenuItem; i++)
+   {
+      BYTE bColor = bLabelColor;
+
+      if (!rgMenuItem[i].fEnabled)
+      {
+         if (i == wCurrentItem)
+         {
+            bColor = MENUITEM_COLOR_SELECTED_INACTIVE;
+         }
+         else
+         {
+            bColor = MENUITEM_COLOR_INACTIVE;
+         }
+      }
+
+      rectMenuItem = PAL_DrawMenuText(PAL_GetWord(rgMenuItem[i].wNumWord), rgMenuItem[i].pos,
+         bColor, TRUE, TRUE);
+	  rgMenuItem[i].width = rectMenuItem.w;
+	  rgMenuItem[i].height = rectMenuItem.h;
+   }
+
+   if (lpfnMenuItemChanged != NULL)
+   {
+      (*lpfnMenuItemChanged)(rgMenuItem[wDefaultItem].wValue);
+   }
+
+   while (TRUE)
+   {
+      PAL_ClearKeyState();
+
+      //
+      // Redraw the selected item if needed.
+      //
+      if (rgMenuItem[wCurrentItem].fEnabled)
+      {
+         PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+            rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+      }
+
+      PAL_ProcessEvent();
+
+	  if (g_InputState.touchEventType == TOUCH_DOWN) {
+
+		  for (i = 0; i < nMenuItem; ++i) {
+			  if (PAL_IsTouch(PAL_X(rgMenuItem[i].pos), PAL_Y(rgMenuItem[i].pos), 100, rgMenuItem[i].height)) {
+					if (rgMenuItem[wCurrentItem].fEnabled)
+					 {
+						//
+						// Dehighlight the unselected item.
+						//
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+					 }
+					 else
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+					 }
+
+					wCurrentItem = i;
+
+					 if (rgMenuItem[wCurrentItem].fEnabled)
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+					 }
+					 else
+					 {
+						PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+						   rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
+					 }
+
+					 if (lpfnMenuItemChanged != NULL)
+					 {
+						(*lpfnMenuItemChanged)(rgMenuItem[wCurrentItem].wValue);
+					 }
+			  }
+		  }
+	  } else if (g_InputState.touchEventType == TOUCH_UP) {
+		  if (wCurrentItem != MENUITEM_VALUE_CANCELLED && wCurrentItem >= 0 && wCurrentItem < nMenuItem &&
+			  PAL_IsTouch(PAL_X(rgMenuItem[wCurrentItem].pos), PAL_Y(rgMenuItem[wCurrentItem].pos), 100, rgMenuItem[wCurrentItem].height)) {
+			if (s_currentSelect != wCurrentItem) {
+				s_currentSelect = wCurrentItem;
+			} else {
+				return rgMenuItem[wCurrentItem].wValue;
+			}
+		  } else if (couldCancel == TRUE) {
+			return MENUITEM_VALUE_CANCELLED;
+		  }
+	  }
+
+      if (g_InputState.dwKeyPress & (kKeyDown | kKeyRight))
+      {
+         //
+         // User pressed the down or right arrow key
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            //
+            // Dehighlight the unselected item.
+            //
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+         }
+
+         wCurrentItem++;
+
+         if (wCurrentItem >= nMenuItem)
+         {
+            wCurrentItem = 0;
+         }
+		 s_currentSelect = wCurrentItem;
+
+         //
+         // Highlight the selected item.
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
+         }
+
+         if (lpfnMenuItemChanged != NULL)
+         {
+            (*lpfnMenuItemChanged)(rgMenuItem[wCurrentItem].wValue);
+         }
+      }
+      else if (g_InputState.dwKeyPress & (kKeyUp | kKeyLeft))
+      {
+         //
+         // User pressed the up or left arrow key
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            //
+            // Dehighlight the unselected item.
+            //
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+         }
+
+         if (wCurrentItem > 0)
+         {
+            wCurrentItem--;
+         }
+         else
+         {
+            wCurrentItem = nMenuItem - 1;
+         }
+		 s_currentSelect = wCurrentItem;
+         //
+         // Highlight the selected item.
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_SELECTED_INACTIVE, FALSE, TRUE);
+         }
+
+         if (lpfnMenuItemChanged != NULL)
+         {
+            (*lpfnMenuItemChanged)(rgMenuItem[wCurrentItem].wValue);
+         }
+      }
+      else if (g_InputState.dwKeyPress & kKeyMenu)
+      {
+         //
+         // User cancelled
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, bLabelColor, FALSE, TRUE);
+         }
+         else
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
+               rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_INACTIVE, FALSE, TRUE);
+         }
+
+         break;
+      }
+      else if (g_InputState.dwKeyPress & kKeySearch)
+      {
+         //
+         // User pressed Enter
+         //
+         if (rgMenuItem[wCurrentItem].fEnabled)
+         {
+            PAL_DrawMenuText(PAL_GetWord(rgMenuItem[wCurrentItem].wNumWord),
                rgMenuItem[wCurrentItem].pos, MENUITEM_COLOR_CONFIRMED, FALSE, TRUE);
 
             return rgMenuItem[wCurrentItem].wValue;

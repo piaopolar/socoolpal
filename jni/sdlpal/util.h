@@ -30,11 +30,6 @@ extern "C"
 {
 #endif
 
-extern char g_resource_dir[256];
-extern char g_application_dir[256];
-
-void init_game_dir(const char* app_dir, const char* res_dir);
-
 void
 trim(
    char *str
@@ -61,6 +56,8 @@ void
 UTIL_Delay(
    unsigned int ms
 );
+
+void UTIL_DelayEx(unsigned int ms, unsigned int delay);
 
 void
 TerminateOnError(
@@ -90,6 +87,21 @@ UTIL_CloseFile(
 );
 
 FILE* open_file(const char* file_name, const char* read_mode);
+char*   my_strlwr(char*   str);
+
+extern void initButton();
+extern void hideButton();
+
+extern void showAds();
+extern void closeAds();
+
+extern void showMenu();
+extern void hideMenu();
+    
+extern void showJoystick();
+extern void hideJoystick();
+
+extern void getScreenSize(int* width, int* height);
 
 #define LOG_EMERG           0 /* system is unusable */
 #define LOG_ALERT           1 /* action must be taken immediately */

@@ -36,8 +36,9 @@
 #define NUM_RIX_TITLE               0x5
 
 int g_game_state = GAME_STATE_PREINIT;
+BOOL g_hasInGame = FALSE;
 
-static VOID
+VOID
 PAL_Init(
    WORD             wScreenWidth,
    WORD             wScreenHeight,
@@ -145,6 +146,10 @@ PAL_Shutdown(
 
 --*/
 {
+    if (g_hasInGame) {
+        PAL_SaveGame("9.rpg", 0);
+    }
+	
    SOUND_CloseAudio();
    PAL_FreeFont();
    PAL_FreeResources();
@@ -367,11 +372,12 @@ PAL_SplashScreen(
       PAL_RLEBlitToSurface(lpBitmapTitle, gpScreen, PAL_XY(255, 10));
 
       VIDEO_UpdateScreen(NULL);
-
+       
       //
       // Check for keypress...
       //
-      if (g_InputState.dwKeyPress & (kKeyMenu | kKeySearch))
+      if (g_InputState.touchEventType == TOUCH_UP ||
+          (g_InputState.dwKeyPress & (kKeyMenu | kKeySearch)))
       {
          //
          // User has pressed a key...
@@ -429,9 +435,23 @@ PAL_SplashScreen(
    PAL_FadeOut(1);
 }
 
+int SDL_mainLoop()
+{
+    //
+    // Show the trademark screen and splash screen
+    //
+    //   PAL_TrademarkScreen();
+#ifndef _DEBUG
+    PAL_SplashScreen();
+#endif
+    
+    PAL_GameMain();
+    return -1;
+}
+
 // 此处的main会被定义为SDL_main，进行sdl的初始化流程
 int
-main(
+SDL_main(
    int      argc,
    char    *argv[]
 )
@@ -452,154 +472,29 @@ main(
 
 --*/
 {
-   WORD          wScreenWidth = 0, wScreenHeight = 0;
-   int           c;
-   int			 m;
-   BOOL          fFullScreen = FALSE;
+   int wScreenWidth = 0, wScreenHeight = 0;
+   BOOL fullScreen = TRUE;
 
+#ifdef __WIN32__
+   fullScreen = FALSE;
+#endif
    UTIL_OpenLog();
-
-#ifdef _WIN32
-#if SDL_MAJOR_VERSION == 1 && SDL_MINOR_VERSION <= 2
-   putenv("SDL_VIDEODRIVER=directx");
-#else
-   putenv("SDL_VIDEODRIVER=windows");
-#endif
-#endif
-
-#ifndef __SYMBIAN32__
-   //
-   // Parse parameters.
-   //
-   while ((c = getopt(argc, argv, "w:h:fjm")) != -1)
-   {
-      switch (c)
-      {
-//       case 'm':
-//     	  m = atoi(optarg);
-//     	  switch(m)
-//     	  {
-//     	  case 0://320*240
-//     		  wScreenWidth = 320;
-//     		  wScreenHeight = 240;
-//     		  break;
-//     	  case 1://400*240
-//     		  wScreenWidth = 400;
-// 			  wScreenHeight = 240;
-// 			  break;
-//     	  case 2://432*240
-//     		  wScreenWidth = 432;
-// 			  wScreenHeight = 240;
-// 			  break;
-//     	  case 3://480*320
-// 			  wScreenWidth = 480;
-// 			  wScreenHeight = 320;
-// 			  break;
-//     	  case 4://800*480
-// 			  wScreenWidth = 800;
-// 			  wScreenHeight = 480;
-// 			  break;
-//     	  case 5://854*480
-// 			  wScreenWidth = 854;
-// 			  wScreenHeight = 480;
-// 			  break;
-//     	  }
-//     	  break;
-      case 'w':
-         //
-         // Set the width of the screen
-         //
-         wScreenWidth = atoi(optarg);
-         if (wScreenHeight == 0)
-         {
-            wScreenHeight = wScreenWidth * 200 / 320;
-         }
-         break;
-
-      case 'h':
-         //
-         // Set the height of the screen
-         //
-         wScreenHeight = atoi(optarg);
-         if (wScreenWidth == 0)
-         {
-            wScreenWidth = wScreenHeight * 320 / 200;
-         }
-         break;
-
-      case 'f':
-         //
-         // Fullscreen Mode
-         //
-         fFullScreen = TRUE;
-         break;
-
-      case 'j':
-         //
-         // Disable joystick
-         //
-         g_fUseJoystick = FALSE;
-         break;
-
-#ifdef PAL_HAS_NATIVEMIDI
-      case 'm':
-         g_fUseMidi = TRUE;
-         break;
-#endif
-      }
-   }
-#endif
-
-   if (wScreenWidth == 0)
-   {
-#ifdef __SYMBIAN32__
-#ifdef __S60_5X__
-      wScreenWidth = 640;
-      wScreenHeight = 360;
-#else
-      wScreenWidth = 320;
-      wScreenHeight = 240;
-#endif
-#else
-#if defined(GPH) || defined(DINGOO)
-      wScreenWidth = 320;
-      wScreenHeight = 240;
-#elif defined (ANDROID)
-      wScreenWidth = 480;
-      wScreenHeight = 320;		
-#else
-#if SCREEN_TYPE == SCREEN_TYPE_SMALL
-	  wScreenWidth = 480;
-      wScreenHeight = 320;
-#elif SCREEN_TYPE == SCREEN_TYPE_MIDDLE
-	  wScreenWidth = 480;
-      wScreenHeight = 320;
-#elif SCREEN_TYPE == SCREEN_TYPE_LARGE
-      wScreenWidth = 640;
-      wScreenHeight = fFullScreen ? 480 : 400;
-#endif
-#endif
-#endif
-   }
-
+    getScreenSize(&wScreenWidth, &wScreenHeight);
    //
    // Initialize everything
    //
 #ifdef PSP
    sdlpal_psp_init();
 #endif
-   PAL_Init(wScreenWidth, wScreenHeight, fFullScreen);
+   PAL_Init(wScreenWidth, wScreenHeight, fullScreen);
+    
+    initButton();
 
-   //
-   // Show the trademark screen and splash screen
-   //
-//   PAL_TrademarkScreen();
-#ifndef _DEBUG
-   PAL_SplashScreen();
+
+#ifdef __ANDROID__
+    SDL_mainLoop();
 #endif
-
-   PAL_GameMain();
-
-   assert(FALSE);
    return 255;
 }
+
+

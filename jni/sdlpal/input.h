@@ -29,17 +29,30 @@ extern "C"
 {
 #endif
 
-typedef enum CONTROL_TYPE
+#define TOUCH_NONE 0
+#define TOUCH_DOWN 1
+#define TOUCH_UP	2
+
+#define GAME_MODE_OPEN 0
+#define GAME_MODE_MAIN 1
+#define GAME_MODE_BATTLE 2
+#define GAME_MODE_MENU 3
+
+typedef enum tagCONTROL_TYPE
 {
 	CONTROL_TYPE_NONE,
 	CONTROL_TYPE_MOUSE_WALK,
-};
+} CONTROL_TYPE;
 
 typedef struct tagPALINPUTSTATE
 {
    PALDIRECTION           dir;
    DWORD				  dirKeyPress;
    DWORD                  dwKeyPress;
+   int					  touchEventType;
+   DWORD					touchX;
+   DWORD					touchY;
+   int					gameMode;
    int nMoveDir;
    int controlType;
 } PALINPUTSTATE;
@@ -64,6 +77,8 @@ enum PALKEY
    kKeyFlee        = (1 << 13),
    kKeyStatus      = (1 << 14),
    kKeyForce       = (1 << 15),
+   kKeyMainMenu		= (1 << 16),
+   kKeyMainSearch	= (1 << 17),
 };
 
 VOID
@@ -85,6 +100,10 @@ VOID
 PAL_ShutdownInput(
    VOID
 );
+
+BOOL PAL_IsTouch(int x, int y, int w, int h);
+BOOL PAL_IsTouchDown(int x, int y, int w, int h);
+BOOL PAL_IsTouchUp(int x, int y, int w, int h);
 
 extern BOOL g_fUseJoystick;
 

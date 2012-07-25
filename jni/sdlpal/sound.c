@@ -43,7 +43,11 @@ BOOL         g_fUseMidi = FALSE;
 
 static BOOL  g_fUseWav = FALSE;
 
+#ifdef __WIN32__
 INT          g_iVolume  = SDL_MIX_MAXVOLUME * 0.1;
+#else
+INT          g_iVolume  = SDL_MIX_MAXVOLUME * 0.5;
+#endif
 
 typedef struct tagSNDPLAYER
 {
@@ -204,8 +208,8 @@ SOUND_FillAudio(
    //
    // Play music
    //
-   if (!g_fNoMusic)
-   {
+//    if (!g_fNoMusic)
+//    {
 #ifdef PAL_HAS_MP3
       if (gSndPlayer.pMP3 != NULL)
       {
@@ -225,7 +229,7 @@ SOUND_FillAudio(
       }
 #endif
       RIX_FillBuffer(stream, len);
-   }
+//   }
 
    //
    // No current playing sound
@@ -259,11 +263,8 @@ SOUND_FillAudio(
       // Mix as much data as possible
       //
       len = (len > gSndPlayer.audio_len[i]) ? gSndPlayer.audio_len[i] : len;
-#ifdef __SYMBIAN32__
+
       SDL_MixAudio(stream, gSndPlayer.pos[i], len, g_iVolume);
-#else
-      SDL_MixAudio(stream, gSndPlayer.pos[i], len, SDL_MIX_MAXVOLUME);
-#endif
       gSndPlayer.pos[i] += len;
       gSndPlayer.audio_len[i] -= len;
    }
@@ -357,11 +358,7 @@ SOUND_OpenAudio(
    gSndPlayer.lock = SDL_CreateMutex();
 #endif
 
-   //
-   // Let the callback function run so that musics will be played.
-   //
-   SDL_PauseAudio(0);
-
+    SDL_PauseAudio(0);
    return 0;
 }
 

@@ -73,11 +73,14 @@ PAL_GameMain(
 --*/
 {
    DWORD       dwTime;
+    extern BOOL g_hasInGame;
 
    //
    // Show the opening menu.
    //
    gpGlobals->bCurrentSaveSlot = (BYTE)PAL_OpeningMenu();
+
+    closeAds();
 
    //
    // Initialize game data and set the flags to load the game resources.
@@ -91,6 +94,10 @@ PAL_GameMain(
   
    while (TRUE)
    {
+	   if (IsInBackground()) {
+		   UTIL_DelayEx(200, 50);
+           continue;
+	   }
       //
       // Do some initialization at game start.
       //
@@ -109,6 +116,7 @@ PAL_GameMain(
       // Clear the input state of previous frame.
       //
       PAL_ClearKeyState();
+       g_hasInGame = TRUE;
 
       //
       // Wait for the time of one frame. Accept input here.
@@ -129,5 +137,10 @@ PAL_GameMain(
       // Run the main frame routine.
       //
       PAL_StartFrame();
+       
+       if (g_hasInGame) {
+           showMenu();
+           showJoystick();
+       }
    }
 }

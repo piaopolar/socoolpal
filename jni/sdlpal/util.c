@@ -26,15 +26,8 @@
 #ifdef PAL_HAS_NATIVEMIDI
 #include "midi.h"
 #endif
+#include "input.h"
 
-char g_application_dir[256] = {0};
-char g_resource_dir[256] = {0};
-
-void init_game_dir(const char* app_dir, const char* res_dir)
-{
-	strncpy(g_application_dir, app_dir, sizeof(g_application_dir) - 1);
-	strncpy(g_resource_dir, res_dir, sizeof(res_dir) - 1);
-}
 
 void
 trim(
@@ -271,12 +264,29 @@ UTIL_Delay(
 {
    unsigned int t = SDL_GetTicks() + ms;
 
-   while (SDL_PollEvent(NULL));
+   PAL_ProcessEvent();
 
    while (SDL_GetTicks() < t)
    {
+	  PAL_ProcessEvent();
       SDL_Delay(1);
-      while (SDL_PollEvent(NULL));
+   }
+
+#ifdef PAL_HAS_NATIVEMIDI
+   MIDI_CheckLoop();
+#endif
+}
+
+void UTIL_DelayEx(unsigned int ms, unsigned int delay)
+{
+   unsigned int t = SDL_GetTicks() + ms;
+
+   PAL_ProcessEvent();
+
+   while (SDL_GetTicks() < t)
+   {
+	  PAL_ProcessEvent();
+      SDL_Delay(delay);
    }
 
 #ifdef PAL_HAS_NATIVEMIDI
@@ -433,22 +443,49 @@ UTIL_CloseFile(
    }
 }
 
+char*   my_strlwr(   char*   str   )
+{
+    char*   orig   =   str;
+    //   process   the   string
+    for   (   ;   *str   != '\0';   str++   )
+        *str   =   tolower(*str);
+    return   orig;
+}
+
+#ifdef __IPHONEOS__
+char g_application_dir[256] = {0};
+char g_resource_dir[256] = "../Documents/";
+#elif defined __ANDROID__
+char g_application_dir[256] = {0};
+char g_resource_dir[256] = "/sdcard/sdlpal/";
+#else
+char g_application_dir[256] = {0};
+char g_resource_dir[256] = {0};
+#endif
+
 FILE* open_file(const char* file_name, const char* read_mode)
 {
+    char szFileName[256] = {0};
 	char szTemp[256] = {0};
 	FILE* fp = NULL;
 
+	strncpy(szFileName, file_name, sizeof(szFileName) - 1);
+    my_strlwr(szFileName);
+
 	// 先查找资源目录，资源目录要求是可以读写的。如果有相同文件，优先读取资源目录下的。（更新文件）
-	snprintf(szTemp, sizeof(szTemp) - 1, "%s%s", g_resource_dir, file_name);
-	strlwr(szTemp);
+	snprintf(szTemp, sizeof(szTemp) - 1, "%s%s", g_resource_dir, szFileName);
+	
 	fp = fopen(szTemp, read_mode);
 
 	if (fp) {
 		return fp;
 	}
 
-	snprintf(szTemp, sizeof(szTemp) - 1, "%s%s", g_application_dir, file_name);
-	strlwr(szTemp);
+#ifdef __ANDROID__
+    return NULL;
+#endif
+
+	snprintf(szTemp, sizeof(szTemp) - 1, "%s%s", g_application_dir, szFileName);
 	fp = fopen(szTemp, read_mode);
 	if (fp) {
 		return fp;
@@ -518,4 +555,43 @@ UTIL_WriteLog(
    va_end(vaa);
 }
 
+#endif
+
+
+#ifdef __WIN32__
+void closeAds()
+{
+}
+
+void initButton()
+{
+}
+
+void hideMenu()
+{
+}
+
+void showMenu()
+{
+}
+
+void getScreenSize(int* width, int* height)
+{
+	if (width) {
+		*width = 480;
+	}
+
+	if (height) {
+		*height = 320;
+	}
+}
+
+void showJoystick()
+{
+}
+
+void hideJoystick()
+{
+}
+#elif defined __ANDROID__
 #endif

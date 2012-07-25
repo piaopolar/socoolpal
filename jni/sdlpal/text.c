@@ -40,6 +40,12 @@ static const char g_rgszAdditionalWords[][WORD_LENGTH + 1] = {
    {0xA4, 0x54, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // 3
    {0xA5, 0x7C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // 4
    {0xA4, 0xAD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // 5
+   {0xA4, 0x57, 0xc2, 0xbd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},	// 上翻
+   {0xA4, 0x55, 0xc2, 0xbd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},	// 下翻
+   {0xA8, 0x74, 0xb2, 0xce, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},		// 系统
+   {0xbd, 0xd5, 0xac, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},		// 调查
+   {0xaa, 0xf0, 0xa6, 0x5e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},		// 返回
+   {0xc4, 0x7e, 0xc4, 0xf2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},		// 继续
 };
 
 typedef struct tagTEXTLIB
@@ -388,6 +394,75 @@ PAL_DrawText(
    }
 }
 
+SDL_Rect
+PAL_DrawMenuText(
+   LPCSTR     lpszText,
+   PAL_POS    pos,
+   BYTE       bColor,
+   BOOL       fShadow,
+   BOOL       fUpdate
+)
+{
+   SDL_Rect   rect, urect;
+   WORD       wChar;
+
+   rect.x = PAL_X(pos);
+   rect.y = PAL_Y(pos);
+
+   urect.x = rect.x;
+   urect.y = rect.y;
+   urect.h = 16;
+   urect.w = 0;
+
+   while (*lpszText)
+   {
+      //
+      // Draw the character
+      //
+      if (*lpszText & 0x80)
+      {
+         //
+         // BIG-5 Chinese Character
+         //
+         wChar = SWAP16(((LPBYTE)lpszText)[0] | (((LPBYTE)lpszText)[1] << 8));
+         if (fShadow)
+         {
+            PAL_DrawCharOnSurface(wChar, gpScreen, PAL_XY(rect.x + 1, rect.y + 1), 0);
+            PAL_DrawCharOnSurface(wChar, gpScreen, PAL_XY(rect.x + 1, rect.y), 0);
+         }
+         PAL_DrawCharOnSurface(wChar, gpScreen, PAL_XY(rect.x, rect.y), bColor);
+         lpszText += 2;
+         rect.x += 16;
+         urect.w += 16;
+      }
+      else
+      {
+         //
+         // ASCII character
+         //
+         if (fShadow)
+         {
+            PAL_DrawASCIICharOnSurface(*lpszText, gpScreen, PAL_XY(rect.x + 1, rect.y + 1), 0);
+            PAL_DrawASCIICharOnSurface(*lpszText, gpScreen, PAL_XY(rect.x + 1, rect.y), 0);
+         }
+         PAL_DrawASCIICharOnSurface(*lpszText, gpScreen, PAL_XY(rect.x, rect.y), bColor);
+         lpszText++;
+         rect.x += 8;
+         urect.w += 8;
+      }
+   }
+
+   //
+   // Update the screen area
+   //
+   if (fUpdate && urect.w > 0)
+   {
+      VIDEO_UpdateScreen(&urect);
+   }
+
+   return urect;
+}
+
 VOID
 PAL_DialogSetDelayTime(
    INT          iDelayTime
@@ -596,7 +671,7 @@ PAL_DialogWaitForKey(
 
    while (TRUE)
    {
-      UTIL_Delay(100);
+      UTIL_Delay(5);
 
       if (g_TextLib.bDialogPosition != kDialogCenterWindow &&
          g_TextLib.bDialogPosition != kDialogCenter)
@@ -613,6 +688,10 @@ PAL_DialogWaitForKey(
 
          VIDEO_SetPalette(palette);
       }
+
+	  if (g_InputState.touchEventType == TOUCH_UP) {
+		  break;
+	  }
 
       if (g_InputState.dwKeyPress != 0)
       {
@@ -684,15 +763,13 @@ PAL_ShowDialogText(
       //
       // The text should be shown in a small window at the center of the screen
       //
-#ifndef PAL_CLASSIC
-      if (gpGlobals->fInBattle && g_Battle.BattleResult == kBattleResultOnGoing)
-      {
-         PAL_BattleUIShowText(lpszText, 1400);
-      }
-      else
-#endif
-      {
-         PAL_POS    pos;
+	   if (!g_isClassicMode) {
+		   if (gpGlobals->fInBattle && g_Battle.BattleResult == kBattleResultOnGoing)
+			{
+				PAL_BattleUIShowText(lpszText, 1400);
+			}
+	   } else {
+		   PAL_POS    pos;
          LPBOX      lpBox;
 
          //
@@ -722,7 +799,7 @@ PAL_ShowDialogText(
          VIDEO_UpdateScreen(&rect);
 
          PAL_EndDialog();
-      }
+	   }
    }
    else
    {

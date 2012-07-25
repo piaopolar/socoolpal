@@ -20,6 +20,8 @@
 */
 #include "SDL_config.h"
 #include "SDL_stdinc.h"
+#include "SDL_assert.h"
+#include "SDL.h"
 
 #ifdef __ANDROID__
 
@@ -31,12 +33,8 @@ extern "C" {
 #include "../../video/android/SDL_androidtouch.h"
 #include "../../video/android/SDL_androidvideo.h"
 
-#include <android/log.h>
-#define LOG_TAG "SDL_android"
-//#define LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
-//#define LOGE(...)  __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,__VA_ARGS__)
-#define LOGI(...) do {} while (false)
-#define LOGE(...) do {} while (false)
+//#define LOGI(...) do {} while (false)
+//#define LOGE(...) do {} while (false)
 
 
 /* Implemented in audio/android/SDL_androidaudio.c */
@@ -53,8 +51,7 @@ extern void Android_RunAudioThread();
 /*******************************************************************************
                                Globals
 *******************************************************************************/
-static JNIEnv* mEnv = NULL;
-static JNIEnv* mAudioEnv = NULL;
+static pthread_key_t mThreadKey;
 static JavaVM* mJavaVM;
 
 // Main activity
@@ -86,17 +83,28 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
         LOGE("Failed to get the environment using GetEnv()");
         return -1;
     }
+    /*
+     * Create mThreadKey so we can keep track of the JNIEnv assigned to each thread
+     * Refer to http://developer.android.com/guide/practices/design/jni.html for the rationale behind this
+     */
+    if (pthread_key_create(&mThreadKey, Android_JNI_ThreadDestroyed)) {
+        __android_log_print(ANDROID_LOG_ERROR, "SDL", "Error initializing pthread key");
+    }
+    else {
+        Android_JNI_SetupThread();
+    }
 
     return JNI_VERSION_1_4;
 }
 
 // Called before SDL_main() to initialize JNI bindings
-extern "C" void SDL_Android_Init(JNIEnv* env, jclass cls)
+extern "C" void SDL_Android_Init(JNIEnv* mEnv, jclass cls)
 {
-    __android_log_print(ANDROID_LOG_INFO, "SDL", "SDL_Android_Init()");
+    LOGI("SDL_Android_Init");
 
-    mEnv = env;
-    mActivityClass = (jclass)env->NewGlobalRef(cls);
+    Android_JNI_SetupThread();
+
+    mActivityClass = (jclass)mEnv->NewGlobalRef(cls);
 
     midCreateGLContext = mEnv->GetStaticMethodID(mActivityClass,
                                 "createGLContext","(II)Z");
@@ -125,6 +133,7 @@ extern "C" void Java_org_libsdl_app_SDLActivity_onNativeResize(
                                     JNIEnv* env, jclass jcls,
                                     jint width, jint height, jint format)
 {
+    LOGI("onNativeResize: %d  %d", width, height);
     Android_SetScreenResolution(width, height, format);
 }
 
@@ -167,6 +176,7 @@ extern "C" void Java_org_libsdl_app_SDLActivity_nativeQuit(
                                     JNIEnv* env, jclass cls)
 {    
     // Inject a SDL_QUIT event
+    LOGI("_nativeQuit");
     SDL_SendQuit();
 }
 
@@ -174,7 +184,10 @@ extern "C" void Java_org_libsdl_app_SDLActivity_nativeQuit(
 extern "C" void Java_org_libsdl_app_SDLActivity_nativePause(
                                     JNIEnv* env, jclass cls)
 {
+     LOGI("_nativePause");
     if (Android_Window) {
+        /* Signal the pause semaphore so the event loop knows to pause and (optionally) block itself */
+        if (!SDL_SemValue(Android_PauseSem)) SDL_SemPost(Android_PauseSem);
         SDL_SendWindowEvent(Android_Window, SDL_WINDOWEVENT_FOCUS_LOST, 0, 0);
         SDL_SendWindowEvent(Android_Window, SDL_WINDOWEVENT_MINIMIZED, 0, 0);
     }
@@ -184,17 +197,37 @@ extern "C" void Java_org_libsdl_app_SDLActivity_nativePause(
 extern "C" void Java_org_libsdl_app_SDLActivity_nativeResume(
                                     JNIEnv* env, jclass cls)
 {
+    LOGI("nativeResume");
     if (Android_Window) {
+        /* Signal the resume semaphore so the event loop knows to resume and restore the GL Context
+         * We can't restore the GL Context here because it needs to be done on the SDL main thread
+         * and this function will be called from the Java thread instead.
+         */
+        if (!SDL_SemValue(Android_ResumeSem)) SDL_SemPost(Android_ResumeSem);
         SDL_SendWindowEvent(Android_Window, SDL_WINDOWEVENT_FOCUS_GAINED, 0, 0);
         SDL_SendWindowEvent(Android_Window, SDL_WINDOWEVENT_RESTORED, 0, 0);
     }
+}
+
+// PauseGame
+extern "C" void Java_org_libsdl_app_SDLActivity_nativePauseGame(
+                                    JNIEnv* env, jclass cls)
+{
+    g_isInBackground = SDL_TRUE;
+}
+
+// ResumeGame
+extern "C" void Java_org_libsdl_app_SDLActivity_nativeResumeGame(
+                                    JNIEnv* env, jclass cls)
+{
+    g_isInBackground = SDL_FALSE;
 }
 
 extern "C" void Java_org_libsdl_app_SDLActivity_nativeRunAudioThread(
                                     JNIEnv* env, jclass cls)
 {
     /* This is the audio thread, with a different environment */
-    mAudioEnv = env;
+    Android_JNI_SetupThread();
 
     Android_RunAudioThread();
 }
@@ -203,8 +236,44 @@ extern "C" void Java_org_libsdl_app_SDLActivity_nativeRunAudioThread(
 /*******************************************************************************
              Functions called by SDL into Java
 *******************************************************************************/
+
+class LocalReferenceHolder
+{
+private:
+    static int s_active;
+
+public:
+    static bool IsActive() {
+        return s_active > 0;
+    }
+
+public:
+    LocalReferenceHolder() : m_env(NULL) { }
+    ~LocalReferenceHolder() {
+        if (m_env) {
+            m_env->PopLocalFrame(NULL);
+            --s_active;
+        }
+    }
+
+    bool init(JNIEnv *env, jint capacity = 16) {
+        if (env->PushLocalFrame(capacity) < 0) {
+            SDL_SetError("Failed to allocate enough JVM local references");
+            return false;
+        }
+        ++s_active;
+        m_env = env;
+        return true;
+    }
+
+protected:
+    JNIEnv *m_env;
+};
+int LocalReferenceHolder::s_active;
+
 extern "C" SDL_bool Android_JNI_CreateContext(int majorVersion, int minorVersion)
 {
+    JNIEnv *mEnv = Android_JNI_GetEnv();
     if (mEnv->CallStaticBooleanMethod(mActivityClass, midCreateGLContext, majorVersion, minorVersion)) {
         return SDL_TRUE;
     } else {
@@ -214,16 +283,19 @@ extern "C" SDL_bool Android_JNI_CreateContext(int majorVersion, int minorVersion
 
 extern "C" void Android_JNI_SwapWindow()
 {
+    JNIEnv *mEnv = Android_JNI_GetEnv();
     mEnv->CallStaticVoidMethod(mActivityClass, midFlipBuffers); 
 }
 
 extern "C" void Android_JNI_SetActivityTitle(const char *title)
 {
     jmethodID mid;
-
+    JNIEnv *mEnv = Android_JNI_GetEnv();
     mid = mEnv->GetStaticMethodID(mActivityClass,"setActivityTitle","(Ljava/lang/String;)V");
     if (mid) {
-        mEnv->CallStaticVoidMethod(mActivityClass, mid, mEnv->NewStringUTF(title));
+        jstring jtitle = reinterpret_cast<jstring>(mEnv->NewStringUTF(title));
+        mEnv->CallStaticVoidMethod(mActivityClass, mid, jtitle);
+        mEnv->DeleteLocalRef(jtitle);
     }
 }
 
@@ -243,6 +315,54 @@ extern "C" SDL_bool Android_JNI_GetAccelerometerValues(float values[3])
     return retval;
 }
 
+static void Android_JNI_ThreadDestroyed(void* value) {
+    /* The thread is being destroyed, detach it from the Java VM and set the mThreadKey value to NULL as required */
+    LOGI("ThreadDestroyed");
+    JNIEnv *env = (JNIEnv*) value;
+    if (env != NULL) {
+        mJavaVM->DetachCurrentThread();
+        pthread_setspecific(mThreadKey, NULL);
+    }
+}
+
+JNIEnv* Android_JNI_GetEnv(void) {
+    /* From http://developer.android.com/guide/practices/jni.html
+     * All threads are Linux threads, scheduled by the kernel.
+     * They're usually started from managed code (using Thread.start), but they can also be created elsewhere and then
+     * attached to the JavaVM. For example, a thread started with pthread_create can be attached with the
+     * JNI AttachCurrentThread or AttachCurrentThreadAsDaemon functions. Until a thread is attached, it has no JNIEnv,
+     * and cannot make JNI calls.
+     * Attaching a natively-created thread causes a java.lang.Thread object to be constructed and added to the "main"
+     * ThreadGroup, making it visible to the debugger. Calling AttachCurrentThread on an already-attached thread
+     * is a no-op.
+     * Note: You can call this function any number of times for the same thread, there's no harm in it
+     */
+
+    JNIEnv *env;
+    int status = mJavaVM->AttachCurrentThread(&env, NULL);
+    if(status < 0) {
+        LOGE("failed to attach current thread");
+        return 0;
+    }
+
+    return env;
+}
+
+int Android_JNI_SetupThread(void) {
+    /* From http://developer.android.com/guide/practices/jni.html
+     * Threads attached through JNI must call DetachCurrentThread before they exit. If coding this directly is awkward,
+     * in Android 2.0 (Eclair) and higher you can use pthread_key_create to define a destructor function that will be
+     * called before the thread exits, and call DetachCurrentThread from there. (Use that key with pthread_setspecific
+     * to store the JNIEnv in thread-local-storage; that way it'll be passed into your destructor as the argument.)
+     * Note: The destructor is not called unless the stored value is != NULL
+     * Note: You can call this function any number of times for the same thread, there's no harm in it
+     *       (except for some lost CPU cycles)
+     */
+    JNIEnv *env = Android_JNI_GetEnv();
+    pthread_setspecific(mThreadKey, (void*) env);
+    return 1;
+}
+
 //
 // Audio support
 //
@@ -256,18 +376,12 @@ extern "C" int Android_JNI_OpenAudioDevice(int sampleRate, int is16Bit, int chan
     int audioBufferFrames;
 
     int status;
-    JNIEnv *env;
-    static bool isAttached = false;    
-    status = mJavaVM->GetEnv((void **) &env, JNI_VERSION_1_4);
-    if(status < 0) {
-        LOGE("callback_handler: failed to get JNI environment, assuming native thread");
-        status = mJavaVM->AttachCurrentThread(&env, NULL);
-        if(status < 0) {
-            LOGE("callback_handler: failed to attach current thread");
-            return 0;
-        }
-        isAttached = true;
+    JNIEnv *env = Android_JNI_GetEnv();
+
+    if (!env) {
+        LOGE("callback_handler: failed to attach current thread");
     }
+    Android_JNI_SetupThread();
 
     
     __android_log_print(ANDROID_LOG_VERBOSE, "SDL", "SDL audio: opening device");
@@ -294,10 +408,6 @@ extern "C" int Android_JNI_OpenAudioDevice(int sampleRate, int is16Bit, int chan
         audioBufferFrames /= 2;
     }
  
-    if (isAttached) {
-        mJavaVM->DetachCurrentThread();
-    }
-
     return audioBufferFrames;
 }
 
@@ -308,6 +418,13 @@ extern "C" void * Android_JNI_GetAudioBuffer()
 
 extern "C" void Android_JNI_WriteAudioBuffer()
 {
+    if (g_isInBackground) {
+        SDL_Delay(50);
+        return;
+    }
+
+    JNIEnv *mAudioEnv = Android_JNI_GetEnv();
+
     if (audioBuffer16Bit) {
         mAudioEnv->ReleaseShortArrayElements((jshortArray)audioBuffer, (jshort *)audioBufferPinned, JNI_COMMIT);
         mAudioEnv->CallStaticVoidMethod(mActivityClass, midAudioWriteShortBuffer, (jshortArray)audioBuffer);
@@ -322,18 +439,7 @@ extern "C" void Android_JNI_WriteAudioBuffer()
 extern "C" void Android_JNI_CloseAudioDevice()
 {
     int status;
-    JNIEnv *env;
-    static bool isAttached = false;    
-    status = mJavaVM->GetEnv((void **) &env, JNI_VERSION_1_4);
-    if(status < 0) {
-        LOGE("callback_handler: failed to get JNI environment, assuming native thread");
-        status = mJavaVM->AttachCurrentThread(&env, NULL);
-        if(status < 0) {
-            LOGE("callback_handler: failed to attach current thread");
-            return;
-        }
-        isAttached = true;
-    }
+    JNIEnv *env = Android_JNI_GetEnv();
 
     env->CallStaticVoidMethod(mActivityClass, midAudioQuit); 
 
@@ -342,15 +448,14 @@ extern "C" void Android_JNI_CloseAudioDevice()
         audioBuffer = NULL;
         audioBufferPinned = NULL;
     }
-
-    if (isAttached) {
-        mJavaVM->DetachCurrentThread();
-    }
 }
 
 // Test for an exception and call SDL_SetError with its detail if one occurs
 static bool Android_JNI_ExceptionOccurred()
 {
+    SDL_assert(LocalReferenceHolder::IsActive());
+    JNIEnv *mEnv = Android_JNI_GetEnv();
+
     jthrowable exception = mEnv->ExceptionOccurred();
     if (exception != NULL) {
         jmethodID mid;
@@ -373,16 +478,11 @@ static bool Android_JNI_ExceptionOccurred()
                     exceptionMessage, 0);
             SDL_SetError("%s: %s", exceptionNameUTF8, exceptionMessageUTF8);
             mEnv->ReleaseStringUTFChars(exceptionMessage, exceptionMessageUTF8);
-            mEnv->DeleteLocalRef(exceptionMessage);
         } else {
             SDL_SetError("%s", exceptionNameUTF8);
         }
 
         mEnv->ReleaseStringUTFChars(exceptionName, exceptionNameUTF8);
-        mEnv->DeleteLocalRef(exceptionName);
-        mEnv->DeleteLocalRef(classClass);
-        mEnv->DeleteLocalRef(exceptionClass);
-        mEnv->DeleteLocalRef(exception);
 
         return true;
     }
@@ -392,6 +492,7 @@ static bool Android_JNI_ExceptionOccurred()
 
 static int Android_JNI_FileOpen(SDL_RWops* ctx)
 {
+    LocalReferenceHolder refs;
     int result = 0;
 
     jmethodID mid;
@@ -402,16 +503,12 @@ static int Android_JNI_FileOpen(SDL_RWops* ctx)
     jobject readableByteChannel;
     jstring fileNameJString;
 
-    bool allocatedLocalFrame = false;
-
-    if (mEnv->PushLocalFrame(16) < 0) {
-        SDL_SetError("Failed to allocate enough JVM local references");
+    JNIEnv *mEnv = Android_JNI_GetEnv();
+    if (!refs.init(mEnv)) {
         goto failure;
-    } else {
-        allocatedLocalFrame = true;
     }
 
-    fileNameJString = (jstring)ctx->hidden.androidio.fileName;
+    fileNameJString = (jstring)ctx->hidden.androidio.fileNameRef;
 
     // context = SDLActivity.getContext();
     mid = mEnv->GetStaticMethodID(mActivityClass,
@@ -431,7 +528,6 @@ static int Android_JNI_FileOpen(SDL_RWops* ctx)
         goto failure;
     }
 
-    ctx->hidden.androidio.inputStream = inputStream;
     ctx->hidden.androidio.inputStreamRef = mEnv->NewGlobalRef(inputStream);
 
     // Despite all the visible documentation on [Asset]InputStream claiming
@@ -459,7 +555,6 @@ static int Android_JNI_FileOpen(SDL_RWops* ctx)
         goto failure;
     }
 
-    ctx->hidden.androidio.readableByteChannel = readableByteChannel;
     ctx->hidden.androidio.readableByteChannelRef =
         mEnv->NewGlobalRef(readableByteChannel);
 
@@ -479,10 +574,11 @@ failure:
         if(ctx->hidden.androidio.inputStreamRef != NULL) {
             mEnv->DeleteGlobalRef((jobject)ctx->hidden.androidio.inputStreamRef);
         }
-    }
 
-    if (allocatedLocalFrame) {
-        mEnv->PopLocalFrame(NULL);
+        if(ctx->hidden.androidio.readableByteChannelRef != NULL) {
+            mEnv->DeleteGlobalRef((jobject)ctx->hidden.androidio.readableByteChannelRef);
+        }
+
     }
 
     return result;
@@ -491,15 +587,22 @@ failure:
 extern "C" int Android_JNI_FileOpen(SDL_RWops* ctx,
         const char* fileName, const char*)
 {
+    LocalReferenceHolder refs;
+    JNIEnv *mEnv = Android_JNI_GetEnv();
+
+    if (!refs.init(mEnv)) {
+        return -1;
+    }
+
     if (!ctx) {
         return -1;
     }
 
     jstring fileNameJString = mEnv->NewStringUTF(fileName);
-    ctx->hidden.androidio.fileName = fileNameJString;
     ctx->hidden.androidio.fileNameRef = mEnv->NewGlobalRef(fileNameJString);
     ctx->hidden.androidio.inputStreamRef = NULL;
-    mEnv->DeleteLocalRef(fileNameJString);
+    ctx->hidden.androidio.readableByteChannelRef = NULL;
+    ctx->hidden.androidio.readMethod = NULL;
 
     return Android_JNI_FileOpen(ctx);
 }
@@ -507,10 +610,20 @@ extern "C" int Android_JNI_FileOpen(SDL_RWops* ctx,
 extern "C" size_t Android_JNI_FileRead(SDL_RWops* ctx, void* buffer,
         size_t size, size_t maxnum)
 {
-    int bytesRemaining = size * maxnum;
+    LocalReferenceHolder refs;
+    jlong bytesRemaining = (jlong) (size * maxnum);
+    jlong bytesMax = (jlong) (ctx->hidden.androidio.size -  ctx->hidden.androidio.position);
     int bytesRead = 0;
 
-    jobject readableByteChannel = (jobject)ctx->hidden.androidio.readableByteChannel;
+    /* Don't read more bytes than those that remain in the file, otherwise we get an exception */
+    if (bytesRemaining >  bytesMax) bytesRemaining = bytesMax;
+
+    JNIEnv *mEnv = Android_JNI_GetEnv();
+    if (!refs.init(mEnv)) {
+        return -1;
+    }
+
+    jobject readableByteChannel = (jobject)ctx->hidden.androidio.readableByteChannelRef;
     jmethodID readMethod = (jmethodID)ctx->hidden.androidio.readMethod;
     jobject byteBuffer = mEnv->NewDirectByteBuffer(buffer, bytesRemaining);
 
@@ -519,7 +632,6 @@ extern "C" size_t Android_JNI_FileRead(SDL_RWops* ctx, void* buffer,
         int result = mEnv->CallIntMethod(readableByteChannel, readMethod, byteBuffer);
 
         if (Android_JNI_ExceptionOccurred()) {
-            mEnv->DeleteLocalRef(byteBuffer);
             return 0;
         }
 
@@ -531,8 +643,6 @@ extern "C" size_t Android_JNI_FileRead(SDL_RWops* ctx, void* buffer,
         bytesRead += result;
         ctx->hidden.androidio.position += result;
     }
-
-    mEnv->DeleteLocalRef(byteBuffer);
 
     return bytesRead / size;
 }
@@ -546,14 +656,21 @@ extern "C" size_t Android_JNI_FileWrite(SDL_RWops* ctx, const void* buffer,
 
 static int Android_JNI_FileClose(SDL_RWops* ctx, bool release)
 {
+    LocalReferenceHolder refs;
     int result = 0;
+    JNIEnv *mEnv = Android_JNI_GetEnv();
+
+    if (!refs.init(mEnv)) {
+        SDL_SetError("Failed to allocate enough JVM local references");
+        return -1;
+    }
 
     if (ctx) {
         if (release) {
             mEnv->DeleteGlobalRef((jobject)ctx->hidden.androidio.fileNameRef);
         }
 
-        jobject inputStream = (jobject)ctx->hidden.androidio.inputStream;
+        jobject inputStream = (jobject)ctx->hidden.androidio.inputStreamRef;
 
         // inputStream.close();
         jmethodID mid = mEnv->GetMethodID(mEnv->GetObjectClass(inputStream),
@@ -600,7 +717,7 @@ extern "C" long Android_JNI_FileSeek(SDL_RWops* ctx, long offset, int whence)
     }
 
     long movement = newPosition - ctx->hidden.androidio.position;
-    jobject inputStream = (jobject)ctx->hidden.androidio.inputStream;
+    jobject inputStream = (jobject)ctx->hidden.androidio.inputStreamRef;
 
     if (movement > 0) {
         unsigned char buffer[1024];

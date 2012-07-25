@@ -37,6 +37,7 @@
 #include "SDL_androidkeyboard.h"
 #include "SDL_androidwindow.h"
 
+#include "SDL_compat.h"
 #define ANDROID_VID_DRIVER_NAME "Android"
 
 /* Initialization/Query functions */
@@ -64,6 +65,7 @@ extern void Android_GL_DeleteContext(_THIS, SDL_GLContext context);
 int Android_ScreenWidth = 0;
 int Android_ScreenHeight = 0;
 Uint32 Android_ScreenFormat = SDL_PIXELFORMAT_UNKNOWN;
+SDL_sem *Android_PauseSem = NULL, *Android_ResumeSem = NULL;
 
 /* Currently only one window */
 SDL_Window *Android_Window = NULL;
@@ -77,13 +79,14 @@ Android_Available(void)
 static void
 Android_DeleteDevice(SDL_VideoDevice * device)
 {
+    LOGI("Android_DeleteDevice");
     SDL_free(device);
 }
 
 static SDL_VideoDevice *
 Android_CreateDevice(int devindex)
 {
-    printf("Creating video device\n");
+    LOGI("Android_CreateDevice");
     SDL_VideoDevice *device;
 
     /* Initialize all variables that we clean on shutdown */
@@ -130,6 +133,7 @@ VideoBootStrap Android_bootstrap = {
 int
 Android_VideoInit(_THIS)
 {
+    LOGI("Android_VideoInit");
     SDL_DisplayMode mode;
 
     mode.format = Android_ScreenFormat;
@@ -153,14 +157,21 @@ Android_VideoInit(_THIS)
 void
 Android_VideoQuit(_THIS)
 {
+    LOGI("Android_VideoQuit");
 }
 
 /* This function gets called before VideoInit() */
 void
 Android_SetScreenResolution(int width, int height, Uint32 format)
 {
-    Android_ScreenWidth = width;
-    Android_ScreenHeight = height;   
+    if (Android_ScreenWidth != 0 || Android_ScreenHeight != 0
+            || width == 0 || height == 0) {
+        return;
+    }
+
+    LOGI("Android_SetScreenResolution: %d  %d", width, height);
+    Android_ScreenWidth = width;//width >= height ? width : height;
+    Android_ScreenHeight = height;//height >= height ? width : height;   
     Android_ScreenFormat = format;
 
     if (Android_Window) {

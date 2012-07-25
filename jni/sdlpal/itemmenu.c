@@ -23,6 +23,10 @@
 static int     g_iNumInventory = 0;
 static WORD    g_wItemFlags = 0;
 static BOOL    g_fNoDesc = FALSE;
+static int     g_iCurMenuItem = 0;
+static int     g_currentSelectItem = 0;
+
+#define PAGE_ITEM_AMOUNT 18
 
 WORD
 PAL_ItemSelectMenuUpdate(
@@ -48,33 +52,42 @@ PAL_ItemSelectMenuUpdate(
    BYTE               bColor;
    static BYTE        bufImage[2048];
    static WORD        wPrevImageIndex = 0xFFFF;
+   SDL_Rect     mainBox;
+   SDL_Rect   upPage, downPage;
+   int currentPage, pageAmount;
 
    //
    // Process input
    //
    if (g_InputState.dwKeyPress & kKeyUp)
    {
-      gpGlobals->iCurInvMenuItem -= 3;
+      g_iCurMenuItem -= 3;
+	  g_currentSelectItem = g_iCurMenuItem;
    }
    else if (g_InputState.dwKeyPress & kKeyDown)
    {
-      gpGlobals->iCurInvMenuItem += 3;
+	  g_iCurMenuItem += 3;
+	  g_currentSelectItem = g_iCurMenuItem;
    }
    else if (g_InputState.dwKeyPress & kKeyLeft)
    {
-      gpGlobals->iCurInvMenuItem--;
+	   g_iCurMenuItem--;
+	   g_currentSelectItem = g_iCurMenuItem;
    }
    else if (g_InputState.dwKeyPress & kKeyRight)
    {
-      gpGlobals->iCurInvMenuItem++;
+	   g_iCurMenuItem++;
+	   g_currentSelectItem = g_iCurMenuItem;
    }
    else if (g_InputState.dwKeyPress & kKeyPgUp)
    {
-      gpGlobals->iCurInvMenuItem -= 3 * 7;
+	   g_iCurMenuItem -= PAGE_ITEM_AMOUNT;
+	   g_currentSelectItem = g_iCurMenuItem;
    }
    else if (g_InputState.dwKeyPress & kKeyPgDn)
    {
-      gpGlobals->iCurInvMenuItem += 3 * 7;
+	   g_iCurMenuItem += PAGE_ITEM_AMOUNT;
+	   g_currentSelectItem = g_iCurMenuItem;
    }
    else if (g_InputState.dwKeyPress & kKeyMenu)
    {
@@ -84,30 +97,60 @@ PAL_ItemSelectMenuUpdate(
    //
    // Make sure the current menu item index is in bound
    //
-   if (gpGlobals->iCurInvMenuItem < 0)
+   if (g_iCurMenuItem < 0)
    {
-      gpGlobals->iCurInvMenuItem = 0;
+      g_iCurMenuItem = 0;
    }
-   else if (gpGlobals->iCurInvMenuItem >= g_iNumInventory)
+   else if (g_iCurMenuItem >= g_iNumInventory)
    {
-      gpGlobals->iCurInvMenuItem = g_iNumInventory - 1;
+      g_iCurMenuItem = g_iNumInventory - 1;
+   }
+
+   if (g_currentSelectItem < 0) {
+	   g_currentSelectItem = 0;
+   }
+
+   if (g_currentSelectItem >= g_iNumInventory) {
+	   g_currentSelectItem = g_iNumInventory - 1;
    }
 
    //
    // Redraw the box
    //
-   PAL_CreateBox(PAL_XY(2, 0), 6, 17, 1, FALSE);
+   PAL_CreateBox(PAL_XY(2, 0), 6, 17, 1, FALSE, &mainBox);
+   
+   upPage.x = 20;
+   upPage.y = 120;
+   upPage.w = 50;
+   upPage.h = 30;
+   downPage.x = 260;
+   downPage.y = 120;
+   downPage.w = 50;
+   downPage.h = 30;
+
+   currentPage = g_iCurMenuItem / PAGE_ITEM_AMOUNT;
+   pageAmount = g_iNumInventory / PAGE_ITEM_AMOUNT + (g_iNumInventory % PAGE_ITEM_AMOUNT == 0 ? 0 : 1);
+
+   if (currentPage > 0) {
+	   PAL_CreateSingleLineBox(PAL_XY(upPage.x, upPage.y), 2, FALSE);
+	   PAL_DrawText(PAL_GetWord(LABEL_PAGE_UP), PAL_XY(upPage.x + 5, upPage.y + 10), MENUITEM_COLOR_CONFIRMED, FALSE, FALSE);
+   }
+
+   if (currentPage < pageAmount - 1) {
+	   PAL_CreateSingleLineBox(PAL_XY(downPage.x, downPage.y), 2, FALSE);
+	   PAL_DrawText(PAL_GetWord(LABEL_PAGE_DOWN), PAL_XY(downPage.x + 5, downPage.y + 10), MENUITEM_COLOR_CONFIRMED, FALSE, FALSE);
+   }
 
    //
    // Draw the texts in the current page
    //
-   i = gpGlobals->iCurInvMenuItem / 3 * 3 - 3 * 4;
+   i = g_iCurMenuItem / PAGE_ITEM_AMOUNT * PAGE_ITEM_AMOUNT;
    if (i < 0)
    {
       i = 0;
    }
 
-   for (j = 0; j < 7; j++)
+   for (j = 0; j < 6; j++)
    {
       for (k = 0; k < 3; k++)
       {
@@ -119,11 +162,11 @@ PAL_ItemSelectMenuUpdate(
             //
             // End of the list reached
             //
-            j = 7;
+            j = 6;
             break;
          }
 
-         if (i == gpGlobals->iCurInvMenuItem)
+         if (i == g_iCurMenuItem)
          {
             if (!(gpGlobals->g.rgObject[wObject].item.wFlags & g_wItemFlags) ||
                (SHORT)gpGlobals->rgInventory[i].nAmount <= (SHORT)gpGlobals->rgInventory[i].nAmountInUse)
@@ -170,7 +213,7 @@ PAL_ItemSelectMenuUpdate(
          //
          // Draw the cursor on the current selected item
          //
-         if (i == gpGlobals->iCurInvMenuItem)
+         if (i == g_iCurMenuItem)
          {
             PAL_RLEBlitToSurface(PAL_SpriteGetFrame(gpSpriteUI, SPRITENUM_CURSOR),
                gpScreen, PAL_XY(40 + k * 100, 22 + j * 18));
@@ -195,7 +238,7 @@ PAL_ItemSelectMenuUpdate(
    PAL_RLEBlitToSurface(PAL_SpriteGetFrame(gpSpriteUI, SPRITENUM_ITEMBOX), gpScreen,
       PAL_XY(5, 140));
 
-   wObject = gpGlobals->rgInventory[gpGlobals->iCurInvMenuItem].wItem;
+   wObject = gpGlobals->rgInventory[g_iCurMenuItem].wItem;
 
    if (gpGlobals->g.rgObject[wObject].item.wBitmap != wPrevImageIndex)
    {
@@ -251,16 +294,79 @@ PAL_ItemSelectMenuUpdate(
       }
    }
 
+	if (g_InputState.touchEventType == TOUCH_DOWN) {
+	   i = g_iCurMenuItem / PAGE_ITEM_AMOUNT * PAGE_ITEM_AMOUNT;
+	   if (i < 0) {
+		   i = 0;
+	   }
+
+	   for (j = 0; j < 6; j++)
+	   {
+		   for (k = 0; k < 3; k++)
+		   {
+			   if (i >= g_iNumInventory) {
+				   j = 6;
+				   break;
+			   }
+
+			   wObject = gpGlobals->rgInventory[i].wItem;
+			   if (!wObject) {
+				   j = 6;
+				   break;
+			   }
+
+			   if (PAL_IsTouch(15 + k * 100, 12 + j * 18, 100, 18)) {
+				   g_iCurMenuItem = i;
+				   wObject = gpGlobals->rgInventory[g_iCurMenuItem].wItem;
+			   }
+
+			   ++i;
+		   }
+	   }
+   } else if (g_InputState.touchEventType == TOUCH_UP) {
+	   i = g_iCurMenuItem % PAGE_ITEM_AMOUNT;
+
+	   j = i / 3;
+       k = i % 3;
+
+	   if (PAL_IsTouch(15 + k * 100, 12 + j * 18, 100, 18)) {
+		   if (g_currentSelectItem != g_iCurMenuItem) {
+			   g_currentSelectItem = g_iCurMenuItem;
+		   } else {
+			   if ((gpGlobals->g.rgObject[wObject].item.wFlags & g_wItemFlags) &&
+				(SHORT)gpGlobals->rgInventory[g_iCurMenuItem].nAmount >
+				(SHORT)gpGlobals->rgInventory[g_iCurMenuItem].nAmountInUse)
+				  {
+					 return wObject;
+				  }
+		   }
+	   } else if (currentPage > 0 && PAL_IsTouch(upPage.x, upPage.y, upPage.w, upPage.h)) {
+		   g_iCurMenuItem -= PAGE_ITEM_AMOUNT;
+		   if (g_iCurMenuItem < 0) {
+			   g_iCurMenuItem = 0;
+		   }
+		   g_currentSelectItem = g_iCurMenuItem;
+	   } else if (currentPage < pageAmount - 1 && PAL_IsTouch(downPage.x, downPage.y, downPage.w, downPage.h)) {
+		   g_iCurMenuItem += PAGE_ITEM_AMOUNT;
+		   if (g_iCurMenuItem >= g_iNumInventory) {
+			   g_iCurMenuItem = g_iNumInventory - 1;
+		   }
+		   g_currentSelectItem = g_iCurMenuItem;
+	   } else if (!PAL_IsTouch(mainBox.x, mainBox.y, mainBox.w, mainBox.h)) {
+		   return 0;
+	   }
+   }
+
    if (g_InputState.dwKeyPress & kKeySearch)
    {
       if ((gpGlobals->g.rgObject[wObject].item.wFlags & g_wItemFlags) &&
-         (SHORT)gpGlobals->rgInventory[gpGlobals->iCurInvMenuItem].nAmount >
-         (SHORT)gpGlobals->rgInventory[gpGlobals->iCurInvMenuItem].nAmountInUse)
+         (SHORT)gpGlobals->rgInventory[g_iCurMenuItem].nAmount >
+         (SHORT)gpGlobals->rgInventory[g_iCurMenuItem].nAmountInUse)
       {
-         if (gpGlobals->rgInventory[gpGlobals->iCurInvMenuItem].nAmount > 0)
+         if (gpGlobals->rgInventory[g_iCurMenuItem].nAmount > 0)
          {
-            j = (gpGlobals->iCurInvMenuItem < 3 * 4) ? (gpGlobals->iCurInvMenuItem / 3) : 4;
-            k = gpGlobals->iCurInvMenuItem % 3;
+            j = (g_iCurMenuItem % PAGE_ITEM_AMOUNT) / 3;
+            k = g_iCurMenuItem % 3;
 
             PAL_DrawText(PAL_GetWord(wObject), PAL_XY(15 + k * 100, 12 + j * 18),
                MENUITEM_COLOR_CONFIRMED, FALSE, FALSE);
@@ -367,14 +473,14 @@ PAL_ItemSelectMenu(
    DWORD            dwTime;
 
    PAL_ItemSelectMenuInit(wItemFlags);
-   iPrevIndex = gpGlobals->iCurInvMenuItem;
+   iPrevIndex = g_iCurMenuItem;
 
    PAL_ClearKeyState();
 
    if (lpfnMenuItemChanged != NULL)
    {
       g_fNoDesc = TRUE;
-      (*lpfnMenuItemChanged)(gpGlobals->rgInventory[gpGlobals->iCurInvMenuItem].wItem);
+      (*lpfnMenuItemChanged)(gpGlobals->rgInventory[g_iCurMenuItem].wItem);
    }
 
    dwTime = SDL_GetTicks();
@@ -387,15 +493,15 @@ PAL_ItemSelectMenu(
       }
 
       w = PAL_ItemSelectMenuUpdate();
-      VIDEO_UpdateScreen(NULL);
+       PAL_ClearKeyState();
 
-      PAL_ClearKeyState();
+      VIDEO_UpdateScreen(NULL);
 
       PAL_ProcessEvent();
       while (SDL_GetTicks() < dwTime)
       {
          PAL_ProcessEvent();
-         if (g_InputState.dwKeyPress != 0)
+         if (g_InputState.touchEventType != TOUCH_NONE || g_InputState.dwKeyPress != 0)
          {
             break;
          }
@@ -410,17 +516,17 @@ PAL_ItemSelectMenu(
          return w;
       }
 
-      if (iPrevIndex != gpGlobals->iCurInvMenuItem)
+      if (iPrevIndex != g_iCurMenuItem)
       {
-         if (gpGlobals->iCurInvMenuItem >= 0 && gpGlobals->iCurInvMenuItem < MAX_INVENTORY)
+         if (g_iCurMenuItem >= 0 && g_iCurMenuItem < MAX_INVENTORY)
          {
             if (lpfnMenuItemChanged != NULL)
             {
-               (*lpfnMenuItemChanged)(gpGlobals->rgInventory[gpGlobals->iCurInvMenuItem].wItem);
+               (*lpfnMenuItemChanged)(gpGlobals->rgInventory[g_iCurMenuItem].wItem);
             }
          }
 
-         iPrevIndex = gpGlobals->iCurInvMenuItem;
+         iPrevIndex = g_iCurMenuItem;
       }
    }
 

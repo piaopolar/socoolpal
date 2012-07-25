@@ -73,7 +73,6 @@ extern "C" {
  *  \name Surface flags
  */
 /*@{*/
-#define SDL_SWSURFACE       0x00000000  /**< \note Not used */
 #define SDL_SRCALPHA        0x00010000
 #define SDL_SRCCOLORKEY     0x00020000
 #define SDL_ANYFORMAT       0x00100000
@@ -96,6 +95,10 @@ extern "C" {
 #define SDL_LOGPAL 0x01
 #define SDL_PHYSPAL 0x02
 
+    /* Obsolete events */
+#define SDL_EVENT_COMPAT1 0x7000 /**< SDL 1.2 events for compatibility */
+#define SDL_EVENT_COMPAT2 0x7001
+#define SDL_EVENT_COMPAT3 0x7002
 #define SDL_ACTIVEEVENT	SDL_EVENT_COMPAT1
 #define SDL_VIDEORESIZE	SDL_EVENT_COMPAT2
 #define SDL_VIDEOEXPOSE	SDL_EVENT_COMPAT3
@@ -350,6 +353,19 @@ extern DECLSPEC int SDLCALL SDL_SetTimer(Uint32 interval, SDL_OldTimerCallback c
 
 extern DECLSPEC int SDLCALL SDL_putenv(const char *variable);
 
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "SDL_android"
+#define LOGI(...)  __android_log_print(ANDROID_LOG_INFO,LOG_TAG,__VA_ARGS__)
+#define LOGE(...)  __android_log_print(ANDROID_LOG_ERROR,LOG_TAG,__VA_ARGS__)
+#else
+#define LOGI(...)
+#define LOGE(...)
+#endif
+
+extern DECLSPEC   int SDLCALL IsInBackground();
+extern Uint32 g_windowId;
 /*@}*//*Compatibility*/
 
 /* Ends C function definitions when using C++ */
